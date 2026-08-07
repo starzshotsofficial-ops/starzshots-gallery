@@ -1,0 +1,29 @@
+{
+  "submissions": [
+    {
+      "submissionId": "1786111673948-2152",
+      "slug": "nakshathra-half-saree",
+      "eventName": "Nakshathra Half Saree Function",
+      "viewerId": "9000000001",
+      "viewerLabel": "Guest One",
+      "role": "guest",
+      "submittedAt": "2026-08-07T14:07:53.948Z",
+      "favorites": [
+        {
+          "scene": "T.Photo",
+          "sceneIndex": 1,
+          "filename": "demo1.jpg",
+          "spacebyteEntryId": "111",
+          "spacebyteHash": "hash1"
+        },
+        {
+          "scene": "C.Photo",
+          "sceneIndex": 2,
+          "filename": "demo2.jpg",
+          "spacebyteEntryId": "222",
+          "spacebyteHash": "hash2"
+        }
+      ]
+    }
+  ]
+}

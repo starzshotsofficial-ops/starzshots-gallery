@@ -1,0 +1,137 @@
+window.STARZ_SAMPLE_GALLERY = {
+  eventName: "Rahul & Priya Wedding",
+  eventDate: "2026-02-14",
+  clientName: "Rahul Sharma and Priya Nair",
+  slug: "rahul-priya-wedding",
+  accessCode: "1234",
+  accessCodes: [
+    {
+      label: "Client",
+      code: "1234",
+      role: "client",
+      allowedViewers: [
+        {
+          name: "Rahul",
+          identifiers: ["rahul@example.com", "919876543210"]
+        },
+        {
+          name: "Priya",
+          identifiers: ["priya@example.com", "919876543211"]
+        },
+        {
+          name: "Bride Father",
+          identifiers: ["father@example.com", "919876543212"]
+        }
+      ],
+      permissions: {
+        canFavorite: true,
+        canDownloadSingle: true,
+        canDownloadAll: true
+      }
+    },
+    {
+      label: "Guest",
+      code: "guest",
+      role: "guest",
+      permissions: {
+        canFavorite: true,
+        canDownloadSingle: true,
+        canDownloadAll: false
+      }
+    }
+  ],
+  spacebyteFolderPath: "weddings/rahul-priya-2026",
+  coverImage: "https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1800&q=80",
+  scenes: [
+    {
+      name: "Ceremony",
+      spacebytePath: "weddings/rahul-priya-2026/ceremony",
+      images: [
+        {
+          id: "ceremony-001",
+          filename: "ceremony-001.jpg",
+          spacebyteEntryId: "entry_ceremony_001",
+          spacebyteHash: "hash_ceremony_001",
+          url: "https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=800&q=75"
+        },
+        {
+          id: "ceremony-002",
+          filename: "ceremony-002.jpg",
+          spacebyteEntryId: "entry_ceremony_002",
+          spacebyteHash: "hash_ceremony_002",
+          url: "https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=800&q=75"
+        },
+        {
+          id: "ceremony-003",
+          filename: "ceremony-003.jpg",
+          spacebyteEntryId: "entry_ceremony_003",
+          spacebyteHash: "hash_ceremony_003",
+          url: "https://images.unsplash.com/photo-1507504031003-b417219a0fde?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1507504031003-b417219a0fde?auto=format&fit=crop&w=800&q=75"
+        }
+      ]
+    },
+    {
+      name: "Portraits",
+      spacebytePath: "weddings/rahul-priya-2026/portraits",
+      images: [
+        {
+          id: "portraits-001",
+          filename: "portraits-001.jpg",
+          spacebyteEntryId: "entry_portraits_001",
+          spacebyteHash: "hash_portraits_001",
+          url: "https://images.unsplash.com/photo-1519741347686-c1e0aadf4611?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1519741347686-c1e0aadf4611?auto=format&fit=crop&w=800&q=75"
+        },
+        {
+          id: "portraits-002",
+          filename: "portraits-002.jpg",
+          spacebyteEntryId: "entry_portraits_002",
+          spacebyteHash: "hash_portraits_002",
+          url: "https://images.unsplash.com/photo-1529634597503-139d3726fed5?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1529634597503-139d3726fed5?auto=format&fit=crop&w=800&q=75"
+        },
+        {
+          id: "portraits-003",
+          filename: "portraits-003.jpg",
+          spacebyteEntryId: "entry_portraits_003",
+          spacebyteHash: "hash_portraits_003",
+          url: "https://images.unsplash.com/photo-1494955870715-979ca4f13bf0?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1494955870715-979ca4f13bf0?auto=format&fit=crop&w=800&q=75"
+        }
+      ]
+    },
+    {
+      name: "Reception",
+      spacebytePath: "weddings/rahul-priya-2026/reception",
+      images: [
+        {
+          id: "reception-001",
+          filename: "reception-001.jpg",
+          spacebyteEntryId: "entry_reception_001",
+          spacebyteHash: "hash_reception_001",
+          url: "https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&w=800&q=75"
+        },
+        {
+          id: "reception-002",
+          filename: "reception-002.jpg",
+          spacebyteEntryId: "entry_reception_002",
+          spacebyteHash: "hash_reception_002",
+          url: "https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&w=800&q=75"
+        },
+        {
+          id: "reception-003",
+          filename: "reception-003.jpg",
+          spacebyteEntryId: "entry_reception_003",
+          spacebyteHash: "hash_reception_003",
+          url: "https://images.unsplash.com/photo-1532712938310-34cb3982ef74?auto=format&fit=crop&w=1600&q=85",
+          thumbnailUrl: "https://images.unsplash.com/photo-1532712938310-34cb3982ef74?auto=format&fit=crop&w=800&q=75"
+        }
+      ]
+    }
+  ]
+};
