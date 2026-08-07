@@ -1,17 +1,14 @@
 {
-  "name": "starz-shots-gallery",
+  "name": "starzshots-gallery",
   "version": "1.0.0",
-  "description": "A lightweight local prototype for a Pic-Time-style photography client gallery.",
-  "main": "app.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "private": true,
+  "description": "Starz Shots Gallery web app",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
 }

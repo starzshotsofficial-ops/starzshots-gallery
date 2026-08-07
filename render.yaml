@@ -1,17 +1,8 @@
 services:
-  - type: web
-    name: starz-shots-gallery
-    runtime: node
+  - type: web_service
+    name: starzshots-gallery
+    env: node
     plan: free
     buildCommand: npm install
-    startCommand: npm start
-    autoDeploy: true
-    envVars:
-      - key: NODE_VERSION
-        value: 20
-      - key: SPACEBYTE_BASE_URL
-        value: https://spacebyte.in/api/v1
-      - key: SPACEBYTE_TOKEN
-        sync: false
-      - key: ADMIN_TOKEN
-        sync: false
+    startCommand: node server.js
+    healthCheckPath: /
