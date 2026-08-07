@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Starz Shots Admin</title>
+    <link rel="stylesheet" href="admin.css">
+  </head>
+  <body>
+    <main class="admin-shell">
+      <header>
+        <p class="kicker">Starz Shots</p>
+        <h1>Admin Event Setup</h1>
+        <p>Create new gallery events after SpaceByte upload.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Admin Access</h2>
+        <label for="adminToken">Admin token</label>
+        <div class="row">
+          <input id="adminToken" type="password" placeholder="Enter ADMIN_TOKEN">
+          <button id="saveToken" type="button">Save Token</button>
+        </div>
+        <p id="tokenStatus" class="muted">Token is required for admin APIs.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Create Event</h2>
+        <form id="createEventForm">
+          <label for="eventName">Event name</label>
+          <input id="eventName" required placeholder="Nakshathra Half Saree Function">
+
+          <label for="eventDate">Event date</label>
+          <input id="eventDate" type="date" required>
+
+          <label for="clientName">Client name</label>
+          <input id="clientName" required placeholder="Abirami Ganesan">
+
+          <label for="slug">Slug</label>
+          <input id="slug" required placeholder="nakshathra-half-saree">
+
+          <label for="spacebyteRootFolderId">SpaceByte root folder ID</label>
+          <input id="spacebyteRootFolderId" placeholder="10937716">
+
+          <label for="spacebyteFolderPath">SpaceByte folder path (optional)</label>
+          <input id="spacebyteFolderPath" placeholder="events/nakshathra-half-saree">
+
+          <label for="clientCode">Client code</label>
+          <input id="clientCode" required placeholder="0208">
+
+          <label for="guestCode">Guest code</label>
+          <input id="guestCode" value="guest">
+
+          <label for="allowedViewers">Allowed viewers (optional, one per line: Name|identifier1,identifier2)</label>
+          <textarea id="allowedViewers" rows="5" placeholder="Abirami|99622063308,abirami@example.com"></textarea>
+
+          <button id="createEvent" type="submit">Create Event</button>
+          <p id="createStatus" class="status" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Existing Events</h2>
+          <button id="refreshEvents" type="button">Refresh</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Slug</th>
+              <th>Event</th>
+              <th>Date</th>
+              <th>Client</th>
+              <th>Client Code</th>
+              <th>Guest Code</th>
+              <th>SpaceByte Mapping</th>
+              <th>Allowed Viewers</th>
+            </tr>
+          </thead>
+          <tbody id="eventsTableBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="admin.js"></script>
+  </body>
+</html>

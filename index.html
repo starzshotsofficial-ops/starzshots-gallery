@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Starz Shots Gallery</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main id="app">
+      <section class="access-screen" data-view="access">
+        <div class="brand">Starz Shots</div>
+        <form class="access-panel" id="accessForm">
+          <p class="label">Private gallery</p>
+          <h1 id="accessTitle">Client Gallery</h1>
+          <p id="accessMeta" class="muted"></p>
+          <label for="viewerId">Email or mobile number</label>
+          <input id="viewerId" name="viewerId" autocomplete="email" placeholder="you@example.com or mobile number">
+          <label for="accessCode">Access code</label>
+          <div class="access-row">
+            <input id="accessCode" name="accessCode" autocomplete="off" placeholder="Enter code">
+            <button type="submit">Open</button>
+          </div>
+          <p class="access-help">Use client code <strong>0208</strong> or guest code <strong>guest</strong> for this sample.</p>
+          <p id="accessError" class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="gallery-shell hidden" data-view="gallery">
+        <header class="hero">
+          <img id="coverImage" alt="">
+          <div class="hero-overlay">
+            <div class="brand">Starz Shots</div>
+            <div>
+              <p class="label" id="eventDate"></p>
+              <h1 id="eventName"></h1>
+              <p id="clientName"></p>
+            </div>
+          </div>
+        </header>
+
+        <nav class="toolbar" aria-label="Gallery tools">
+          <div class="scene-tabs" id="sceneTabs"></div>
+          <div class="actions">
+            <button type="button" id="showAll" class="icon-button active" title="Show all photos">All</button>
+            <button type="button" id="showFavorites" class="icon-button" title="Show favorites">Favorites <span id="favoriteCount">0</span></button>
+            <button type="button" id="downloadFavoritesCsv" class="icon-button hidden" title="Export favorites CSV">Export CSV</button>
+            <button type="button" id="downloadAll" class="icon-button" title="Download full gallery">Download All</button>
+            <span id="visitorRole" class="role-badge"></span>
+          </div>
+        </nav>
+
+        <section class="gallery-grid" id="galleryGrid" aria-live="polite"></section>
+      </section>
+
+      <dialog id="lightbox">
+        <button type="button" class="close-button" id="closeLightbox" aria-label="Close">x</button>
+        <button type="button" class="lightbox-nav previous" id="previousImage" aria-label="Previous image">&lt;</button>
+        <img id="lightboxImage" alt="">
+        <button type="button" class="lightbox-nav next" id="nextImage" aria-label="Next image">&gt;</button>
+        <footer>
+          <div>
+            <strong id="lightboxScene"></strong>
+            <span id="lightboxFilename"></span>
+          </div>
+          <button type="button" id="lightboxFavorite">Favorite</button>
+          <button type="button" id="lightboxRemove" class="remove-button hidden">Remove</button>
+          <a id="lightboxDownload" class="download-button" href="#" target="_blank" rel="noopener">Download Photo</a>
+        </footer>
+      </dialog>
+    </main>
+    <script src="data/gallery.sample.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

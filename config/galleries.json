@@ -1,0 +1,89 @@
+{
+  "galleries": [
+    {
+      "slug": "rahul-priya-wedding",
+      "eventName": "Rahul & Priya Wedding",
+      "eventDate": "2026-02-14",
+      "clientName": "Rahul Sharma and Priya Nair",
+      "spacebyteFolderPath": "weddings/rahul-priya-2026",
+      "spacebyteRootFolderId": "",
+      "coverImage": "",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "1234",
+          "role": "client",
+          "allowedViewers": [
+            {
+              "name": "Rahul",
+              "identifiers": [
+                "rahul@example.com",
+                "919876543210"
+              ]
+            },
+            {
+              "name": "Priya",
+              "identifiers": [
+                "priya@example.com",
+                "919876543211"
+              ]
+            },
+            {
+              "name": "Bride Father",
+              "identifiers": [
+                "father@example.com",
+                "919876543212"
+              ]
+            }
+          ],
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ]
+    },
+    {
+      "slug": "nakshathra-half-saree",
+      "eventName": "Nakshathra Half Saree Function",
+      "eventDate": "2026-08-02",
+      "clientName": "Abirami Ganesan",
+      "spacebyteFolderPath": "",
+      "spacebyteRootFolderId": "10937716",
+      "coverImage": "",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "0208",
+          "role": "client",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ]
+    }
+  ]
+}
