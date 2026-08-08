@@ -24,6 +24,42 @@
           "spacebyteHash": "hash2"
         }
       ]
+    },
+    {
+      "submissionId": "1786197259316-193",
+      "slug": "rahul-priya-wedding",
+      "eventName": "Rahul & Priya Wedding",
+      "viewerId": "guest@test.com",
+      "viewerLabel": "Guest",
+      "role": "guest",
+      "submittedAt": "2026-08-08T13:54:19.316Z",
+      "favorites": [
+        {
+          "scene": "Ceremony",
+          "sceneIndex": 1,
+          "filename": "ceremony-001.jpg",
+          "spacebyteEntryId": "entry_ceremony_001",
+          "spacebyteHash": "hash_ceremony_001"
+        }
+      ]
+    },
+    {
+      "submissionId": "1786198844300-484",
+      "slug": "nakshathra-half-saree-function",
+      "eventName": "Nakshathra Half Saree Function",
+      "viewerId": "guest@test.com",
+      "viewerLabel": "Guest",
+      "role": "guest",
+      "submittedAt": "2026-08-08T14:20:44.300Z",
+      "favorites": [
+        {
+          "scene": "T.Photo",
+          "sceneIndex": 1,
+          "filename": "1Y9A5510.JPG",
+          "spacebyteEntryId": "10960978",
+          "spacebyteHash": "hash1"
+        }
+      ]
     }
   ]
 }

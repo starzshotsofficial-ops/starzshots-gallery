@@ -106,7 +106,7 @@ function openGallery() {
 function applyPermissions() {
   elements.showFavorites.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.downloadAll.classList.toggle("hidden", !state.permissions.canDownloadAll);
-  elements.downloadFavoritesCsv.classList.toggle("hidden", !canManageGallery());
+  elements.downloadFavoritesCsv.classList.toggle("hidden", !canExportCsv());
   elements.lightboxFavorite.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
   elements.lightboxRemove.classList.toggle("hidden", !canManageGallery());
@@ -419,17 +419,13 @@ function downloadFullGallery() {
 }
 
 function downloadFavoritesCsv() {
-  if (!canManageGallery()) return;
+  if (!canExportCsv()) return;
 
   const favoriteItems = state.gallery.scenes.flatMap((scene) =>
     scene.images
       .filter((image) => state.favorites.has(image.id))
-      .map((image, index) => ({
-        scene: scene.name,
-        sceneIndex: scene.images.indexOf(image) + 1,
-        filename: image.filename,
-        url: image.downloadUrl || image.url
-      }))
+      .map((image) => String(image.filename || "").trim())
+      .filter(Boolean)
   );
 
   if (!favoriteItems.length) {
@@ -437,9 +433,8 @@ function downloadFavoritesCsv() {
     return;
   }
 
-  const header = ["scene", "sceneIndex", "filename", "url"];
-  const csv = [header.join(",")].concat(
-    favoriteItems.map((item) => header.map((key) => JSON.stringify(item[key] || "")).join(","))
+  const csv = ["filename"].concat(
+    favoriteItems.map((filename) => JSON.stringify(filename))
   ).join("\n");
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -455,6 +450,10 @@ function downloadFavoritesCsv() {
 
 function canManageGallery() {
   return state.role === "client";
+}
+
+function canExportCsv() {
+  return state.permissions.canFavorite;
 }
 
 async function removeImagePermanently(image) {

@@ -1,1 +1,41 @@
-{"galleries": []}
+{
+  "galleries": [
+    {
+      "eventName": "Nakshathra Half Saree Function",
+      "eventDate": "2026-08-02",
+      "clientName": "Abirami Ganesan",
+      "slug": "nakshathra-half-saree-function",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "0208",
+          "role": "client",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ],
+      "spacebyteRootFolderId": "10937716",
+      "spacebyteRootFolderHash": "MTA5Mzc3MTZ8cA",
+      "spacebyteFolderName": "Nakshathra Half Saree Function",
+      "sceneFolderNames": [
+        "T.Photo",
+        "C.Photo"
+      ],
+      "scenes": [],
+      "coverImage": ""
+    }
+  ]
+}
