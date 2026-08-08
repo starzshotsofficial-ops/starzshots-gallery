@@ -14,6 +14,7 @@ const favoritesStorePath = path.join(rootDir, "data", "favorites-submissions.jso
 
 const spacebyteBaseUrl = env.SPACEBYTE_BASE_URL || "https://spacebyte.in/api/v1";
 const spacebyteToken = env.SPACEBYTE_TOKEN || "";
+const spacebyteAuthScheme = String(env.SPACEBYTE_AUTH_SCHEME || "Bearer").trim() || "Bearer";
 const adminToken = env.ADMIN_TOKEN || "";
 const allowInsecureTls = String(env.SPACEBYTE_ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
@@ -68,6 +69,12 @@ const server = http.createServer(async (request, response) => {
           allowedViewers: getAllowedViewerSummary(gallery)
         }))
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/admin/spacebyte-status") {
+      if (!authorizeAdmin(request, response)) return;
+      await handleSpaceByteStatus(response);
       return;
     }
 
@@ -409,6 +416,100 @@ async function checkGalleryExistsInSpaceByte(gallery) {
   }
 }
 
+async function handleSpaceByteStatus(response) {
+  const diagnostics = {
+    configured: {
+      baseUrl: spacebyteBaseUrl,
+      authScheme: spacebyteAuthScheme,
+      tokenPresent: Boolean(spacebyteToken),
+      allowInsecureTls
+    },
+    timestamp: new Date().toISOString(),
+    checks: []
+  };
+
+  if (!spacebyteToken) {
+    sendJson(response, 503, {
+      ...diagnostics,
+      ok: false,
+      error: "SPACEBYTE_TOKEN is not configured."
+    });
+    return;
+  }
+
+  diagnostics.checks.push(await runSpaceByteCheck("api", `${spacebyteBaseUrl}/drive/file-entries?page=1`));
+
+  for (const gallery of config.galleries || []) {
+    if (!hasSpaceByteSource(gallery)) {
+      diagnostics.checks.push({
+        type: "gallery",
+        slug: gallery.slug,
+        ok: false,
+        skipped: true,
+        reason: "No SpaceByte folder source configured"
+      });
+      continue;
+    }
+
+    const check = await runSpaceByteGalleryCheck(gallery);
+    diagnostics.checks.push(check);
+  }
+
+  const ok = diagnostics.checks.every((check) => check.ok || check.skipped);
+  sendJson(response, ok ? 200 : 502, { ...diagnostics, ok });
+}
+
+async function runSpaceByteGalleryCheck(gallery) {
+  const params = new URLSearchParams();
+  if (gallery.spacebyteRootFolderId) {
+    params.set("folderId", String(gallery.spacebyteRootFolderId));
+    params.set("parentId", String(gallery.spacebyteRootFolderId));
+  }
+  if (gallery.spacebyteFolderPath) {
+    params.set("path", String(gallery.spacebyteFolderPath));
+  }
+
+  const url = `${spacebyteBaseUrl}/drive/file-entries${params.toString() ? `?${params}` : ""}`;
+  const result = await runSpaceByteCheck("gallery", url);
+  return {
+    ...result,
+    slug: gallery.slug,
+    eventName: gallery.eventName,
+    rootFolderId: String(gallery.spacebyteRootFolderId || ""),
+    folderPath: String(gallery.spacebyteFolderPath || ""),
+    folderName: String(gallery.spacebyteFolderName || "")
+  };
+}
+
+async function runSpaceByteCheck(type, url) {
+  try {
+    const payload = await spacebyteJson(url);
+    const count = Array.isArray(payload?.data) ? payload.data.length : null;
+    return {
+      type,
+      ok: true,
+      count,
+      request: sanitizeSpaceByteUrl(url)
+    };
+  } catch (error) {
+    return {
+      type,
+      ok: false,
+      error: String(error?.message || "Unknown SpaceByte error"),
+      request: sanitizeSpaceByteUrl(url)
+    };
+  }
+}
+
+function sanitizeSpaceByteUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
 async function handleFinalizeFavoritesRequest(request, url, response) {
   const parts = url.pathname.split("/").filter(Boolean);
   const slug = decodeURIComponent(parts[2] || "");
@@ -535,17 +636,23 @@ async function handleGalleryRequest(url, response) {
     return;
   }
 
-  if (spacebyteToken && hasSpaceByteSource(gallery)) {
-    const cached = getCachedHydratedGallery(slug);
-    gallery = cached || (await hydrateGalleryFromSpaceByte(gallery));
-    if (!cached) {
-      setCachedHydratedGallery(slug, gallery);
-    }
-  }
-
   if (url.pathname.endsWith("/meta")) {
     sendJson(response, 200, buildMetaFromGallery(gallery));
     return;
+  }
+
+  if (spacebyteToken && hasSpaceByteSource(gallery)) {
+    const cached = getCachedHydratedGallery(slug);
+    if (cached) {
+      gallery = cached;
+    } else {
+      try {
+        gallery = await hydrateGalleryFromSpaceByte(gallery);
+        setCachedHydratedGallery(slug, gallery);
+      } catch (error) {
+        console.error(`SpaceByte hydration failed for '${slug}': ${error.message}`);
+      }
+    }
   }
 
   sendJson(response, 200, gallery);
@@ -601,7 +708,7 @@ async function handleDownloadAllRequest(url, response) {
 
 async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
   const upstream = await fetch(sourceUrl, {
-    headers: { Authorization: `Bearer ${spacebyteToken}` }
+    headers: { Authorization: `${spacebyteAuthScheme} ${spacebyteToken}` }
   });
 
   if (!upstream.ok || !upstream.body) {
@@ -818,8 +925,9 @@ async function spacebyteFetchPage(filters, page) {
 
   if (filters?.folderId) {
     params.set("folderId", String(filters.folderId));
+    params.set("parentId", String(filters.parentId || filters.folderId));
   }
-  if (filters?.parentId) {
+  if (!filters?.folderId && filters?.parentId) {
     params.set("parentId", String(filters.parentId));
   }
   if (filters?.path) {
@@ -931,7 +1039,7 @@ function loadEnv(filePath) {
 async function spacebyteJson(url) {
   const headers = {};
   if (spacebyteToken) {
-    headers.Authorization = `Bearer ${spacebyteToken}`;
+    headers.Authorization = `${spacebyteAuthScheme} ${spacebyteToken}`;
   }
 
   const attempt = async () => {
@@ -941,7 +1049,9 @@ async function spacebyteJson(url) {
     try {
       const response = await fetch(url, { headers, signal: controller.signal });
       if (!response.ok) {
-        throw new Error(`SpaceByte request failed with status ${response.status}`);
+        const body = await response.text().catch(() => "");
+        const detail = body ? ` - ${body.slice(0, 240)}` : "";
+        throw new Error(`SpaceByte request failed with status ${response.status}${detail}`);
       }
       return await response.json();
     } finally {
