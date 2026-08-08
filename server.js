@@ -6,7 +6,8 @@ const { Readable } = require("stream");
 
 const rootDir = __dirname;
 const port = Number(process.env.PORT || 8080);
-const env = loadEnv(path.join(rootDir, ".env"));
+// Merge .env (local dev) with process.env, which takes precedence (Render/host-provided vars)
+const env = { ...loadEnv(path.join(rootDir, ".env")), ...process.env };
 const galleriesConfigPath = path.join(rootDir, "config", "galleries.json");
 const config = readJson(galleriesConfigPath) || { galleries: [] };
 const favoritesStorePath = path.join(rootDir, "data", "favorites-submissions.json");
