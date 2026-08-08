@@ -1,4 +1,4 @@
-const gallerySlug = "nakshathra-half-saree";
+const gallerySlug = "nakshathra-half-saree-function";
 const gallerySource = `/api/galleries/${gallerySlug}`;
 const galleryMetaSource = `/api/galleries/${gallerySlug}/meta`;
 
@@ -406,4 +406,193 @@ function downloadFullGallery() {
   }
 
   const imageUrls = state.gallery.scenes.flatMap((scene) =>
-    scene.images.map((image) => `${scene.name}/${image.filename}
+    scene.images.map((image) => image.downloadUrl || image.url)
+  );
+
+  if (!imageUrls.length) {
+    window.alert("No images are available for download.");
+    return;
+  }
+
+  window.alert("Bulk download is not supported for this gallery. Opening the first image instead.");
+  window.open(imageUrls[0], "_blank");
+}
+
+function downloadFavoritesCsv() {
+  if (!canManageGallery()) return;
+
+  const favoriteItems = state.gallery.scenes.flatMap((scene) =>
+    scene.images
+      .filter((image) => state.favorites.has(image.id))
+      .map((image, index) => ({
+        scene: scene.name,
+        sceneIndex: scene.images.indexOf(image) + 1,
+        filename: image.filename,
+        url: image.downloadUrl || image.url
+      }))
+  );
+
+  if (!favoriteItems.length) {
+    window.alert("No favorites selected.");
+    return;
+  }
+
+  const header = ["scene", "sceneIndex", "filename", "url"];
+  const csv = [header.join(",")].concat(
+    favoriteItems.map((item) => header.map((key) => JSON.stringify(item[key] || "")).join(","))
+  ).join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${state.gallery.slug}-favorites.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function canManageGallery() {
+  return state.role === "client";
+}
+
+async function removeImagePermanently(image) {
+  if (!canManageGallery()) return;
+
+  if (!window.confirm("Are you sure you want to remove this photo?")) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/files/${encodeURIComponent(image.id)}`, {
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to remove the photo.");
+    }
+
+    state.gallery.scenes = state.gallery.scenes.map((scene) => ({
+      ...scene,
+      images: scene.images.filter((img) => img.id !== image.id)
+    }));
+
+    renderGrid();
+    if (elements.lightbox.open) {
+      elements.lightbox.close();
+    }
+  } catch (error) {
+    window.alert(error.message || "Failed to remove image.");
+  }
+}
+
+function setAccessError(message) {
+  elements.accessError.textContent = message || "";
+}
+
+function getViewerLabelForRole(access, viewerId) {
+  if (!access || !viewerId) return viewerId;
+
+  const viewer = access.allowedViewers?.find((entry) =>
+    entry.identifiers.some((identifier) => normalizeViewerId(String(identifier)) === viewerId)
+  );
+
+  return viewer?.name || viewerId;
+}
+
+async function handleAccessFormSubmit(event) {
+  event.preventDefault();
+  setAccessError("");
+
+  const rawViewerId = elements.viewerId.value;
+  const accessCode = elements.accessCode.value;
+
+  if (!rawViewerId || !accessCode) {
+    setAccessError("Please enter both your name/email and access code.");
+    return;
+  }
+
+  if (!isValidViewerId(rawViewerId)) {
+    setAccessError("Enter a valid name or email address.");
+    return;
+  }
+
+  const access = getRoleForAccessCode(accessCode);
+  if (!access) {
+    setAccessError("Invalid access code.");
+    return;
+  }
+
+  const normalizedViewerId = normalizeViewerId(rawViewerId);
+  if (access.role === "client" && access.allowedViewers?.length) {
+    const allowed = access.allowedViewers.some((viewer) =>
+      viewer.identifiers.some((identifier) => normalizeViewerId(String(identifier)) === normalizedViewerId)
+    );
+
+    if (!allowed) {
+      setAccessError("You are not authorized to access this gallery with that code.");
+      return;
+    }
+  }
+
+  try {
+    await ensureGalleryLoaded();
+    state.role = access.role;
+    state.viewerId = normalizedViewerId;
+    state.viewerLabel = getViewerLabelForRole(access, normalizedViewerId);
+    state.accessCode = accessCode;
+    state.permissions = access.permissions || {
+      canFavorite: true,
+      canDownloadSingle: true,
+      canDownloadAll: false
+    };
+    state.favorites = new Set(readFavorites());
+    openGallery();
+  } catch (error) {
+    setAccessError(error.message || "Unable to load gallery data.");
+  }
+}
+
+function bindUiEvents() {
+  elements.accessForm.addEventListener("submit", handleAccessFormSubmit);
+  elements.showAll.addEventListener("click", () => {
+    state.favoritesOnly = false;
+    renderScenes();
+    renderGrid();
+  });
+  elements.showFavorites.addEventListener("click", () => {
+    state.favoritesOnly = true;
+    renderScenes();
+    renderGrid();
+  });
+  elements.downloadAll.addEventListener("click", downloadFullGallery);
+  elements.downloadFavoritesCsv.addEventListener("click", downloadFavoritesCsv);
+  elements.closeLightbox.addEventListener("click", () => {
+    if (elements.lightbox.open) elements.lightbox.close();
+  });
+  elements.previousImage.addEventListener("click", () => moveLightbox(-1));
+  elements.nextImage.addEventListener("click", () => moveLightbox(1));
+  elements.lightboxFavorite.addEventListener("click", () => {
+    const image = state.visibleImages[state.lightboxIndex];
+    if (!image) return;
+    toggleFavorite(image.id);
+  });
+  elements.lightboxRemove.addEventListener("click", async () => {
+    const image = state.visibleImages[state.lightboxIndex];
+    if (!image) return;
+    await removeImagePermanently(image);
+  });
+}
+
+async function init() {
+  bindUiEvents();
+
+  try {
+    await loadGallery();
+  } catch (error) {
+    setAccessError(error.message || "Failed to load gallery metadata.");
+  }
+}
+
+init();
