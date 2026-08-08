@@ -753,13 +753,13 @@ function toGalleryImage(sceneName, entry) {
 async function resolveEventFolder(gallery) {
   const rootId = String(gallery.spacebyteRootFolderId || "").trim();
   if (rootId) {
-    const selfEntries = await spacebyteListAll({ parentId: rootId }).catch(() => []);
-    const selfMatch = selfEntries.find((entry) => String(entry.id) === rootId);
-    if (selfMatch) return selfMatch;
-
-    const rootEntries = await spacebyteListAll({});
-    const rootMatch = rootEntries.find((entry) => String(entry.id) === rootId);
-    if (rootMatch) return rootMatch;
+    // Folder id/hash are already known from config, so query its children directly
+    // instead of listing the parent/root (which the API forbids without a folderId filter).
+    return {
+      id: rootId,
+      hash: String(gallery.spacebyteRootFolderHash || ""),
+      path: ""
+    };
   }
 
   const folderName = String(gallery.spacebyteFolderName || gallery.eventName || "").trim().toLowerCase();
