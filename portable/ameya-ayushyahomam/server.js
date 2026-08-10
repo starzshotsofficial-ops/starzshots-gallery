@@ -12,13 +12,17 @@ const { Readable } = require("stream");
 // so writable data (favorites) must live next to the actual executable instead.
 const assetsDir = __dirname;
 const baseDir = process.pkg ? path.dirname(process.execPath) : __dirname;
-const env = { ...loadEnv(path.join(assetsDir, ".env")), ...process.env };
+const envPaths = process.pkg
+  ? [path.join(assetsDir, ".env"), path.join(baseDir, ".env")]
+  : [path.join(assetsDir, ".env")];
+const env = { ...loadEnvFromCandidates(envPaths), ...process.env };
 
 const PORT = Number(env.PORT || 8088);
 
 // --- Hardcoded event configuration (copied from config/galleries.json) ---
 const SPACEBYTE_BASE_URL = env.SPACEBYTE_BASE_URL || "https://spacebyte.in/api/v1";
-const SPACEBYTE_TOKEN = env.SPACEBYTE_TOKEN || "";
+const HARDCODED_SPACEBYTE_TOKEN = ""; // Optional: embed token directly here before building
+const SPACEBYTE_TOKEN = env.SPACEBYTE_TOKEN || HARDCODED_SPACEBYTE_TOKEN || "";
 const SPACEBYTE_AUTH_SCHEME = env.SPACEBYTE_AUTH_SCHEME || "Bearer";
 const ALLOW_INSECURE_TLS = String(env.SPACEBYTE_ALLOW_INSECURE_TLS || "true").trim().toLowerCase() === "true";
 
@@ -126,8 +130,10 @@ server.listen(PORT, () => {
   ensureFavoritesStore();
   const url = `http://localhost:${PORT}`;
   console.log(`Starz Shots Gallery (${GALLERY.eventName}) running at ${url}`);
+  console.log(`Using SpaceByte base URL: ${SPACEBYTE_BASE_URL}`);
+  console.log(`SpaceByte token ${SPACEBYTE_TOKEN ? `loaded (${SPACEBYTE_TOKEN.length} chars)` : "missing"}`);
   if (!SPACEBYTE_TOKEN) {
-    console.warn("Warning: SPACEBYTE_TOKEN is not set (missing .env next to server.js). Photos will not load.");
+    console.warn("Warning: SPACEBYTE_TOKEN is not set. Photos will not load.");
   }
   openBrowser(url);
 });
@@ -204,17 +210,19 @@ function compareFilenamesNatural(a, b) {
 
 function toGalleryImage(sceneName, entry) {
   const hash = String(entry.hash || "");
+  const entryId = String(entry.id || "");
   const filename = String(entry.name || entry.file_name || `image-${entry.id}.jpg`);
   const id = `${toSlug(sceneName)}-${entry.id}`;
+  const downloadKey = entryId || hash;
 
   return {
     id,
     filename,
-    spacebyteEntryId: String(entry.id || ""),
+    spacebyteEntryId: entryId,
     spacebyteHash: hash,
-    url: `/api/files/${encodeURIComponent(hash)}`,
-    thumbnailUrl: `/api/files/${encodeURIComponent(hash)}`,
-    downloadUrl: `/api/files/${encodeURIComponent(hash)}`
+    url: `/api/files/${encodeURIComponent(entryId)}`,
+    thumbnailUrl: `/api/files/${encodeURIComponent(entryId)}`,
+    downloadUrl: `/api/files/${encodeURIComponent(entryId)}`
   };
 }
 
@@ -265,7 +273,11 @@ function spacebyteFetchPage(filters, page) {
 }
 
 async function spacebyteJson(url) {
-  const headers = { Authorization: `${SPACEBYTE_AUTH_SCHEME} ${SPACEBYTE_TOKEN}` };
+  const headers = {
+    Authorization: `${SPACEBYTE_AUTH_SCHEME} ${SPACEBYTE_TOKEN}`,
+    Accept: "application/json",
+    "User-Agent": "StarzShotsGallery/1.0"
+  };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
 
@@ -283,13 +295,53 @@ async function spacebyteJson(url) {
 
 async function handleFileDownload(url, response) {
   const parts = url.pathname.split("/").filter(Boolean);
-  const hash = decodeURIComponent(parts[2] || "").trim();
-  if (!hash) {
-    sendJson(response, 400, { error: "Missing file hash." });
+  const key = decodeURIComponent(parts[2] || "").trim();
+  if (!key) {
+    sendJson(response, 400, { error: "Missing file key." });
     return;
   }
 
-  await proxySpaceByteDownload(`${SPACEBYTE_BASE_URL}/file-entries/download/${encodeURIComponent(hash)}`, response, "inline");
+  const isNumericId = /^[0-9]+$/.test(key);
+  let sourceUrl = isNumericId
+    ? `${SPACEBYTE_BASE_URL}/file-entries/${encodeURIComponent(key)}/download`
+    : `${SPACEBYTE_BASE_URL}/file-entries/download/${encodeURIComponent(key)}`;
+
+  console.log(`File download request for key=${key} numeric=${isNumericId} sourceUrl=${sourceUrl}`);
+
+  let success = await proxySpaceByteDownload(sourceUrl, response, "inline", { sendErrors: false });
+  if (!success && !isNumericId) {
+    if (!hydratedGallery || hydrationExpiresAt <= Date.now()) {
+      try {
+        hydratedGallery = await hydrateGalleryFromSpaceByte();
+        hydrationExpiresAt = Date.now() + CACHE_TTL_MS;
+      } catch (error) {
+        console.warn(`Failed to refresh gallery cache for hash fallback: ${error.message}`);
+      }
+    }
+
+    const entryId = resolveSpaceByteEntryIdByHash(key);
+    if (entryId) {
+      const retryUrl = `${SPACEBYTE_BASE_URL}/file-entries/${encodeURIComponent(entryId)}/download`;
+      console.log(`Retrying SpaceByte image download using entryId=${entryId} retryUrl=${retryUrl}`);
+      success = await proxySpaceByteDownload(retryUrl, response, "inline", { sendErrors: false });
+    }
+  }
+
+  if (!success) {
+    await proxySpaceByteDownload(sourceUrl, response, "inline", { sendErrors: true });
+  }
+}
+
+function resolveSpaceByteEntryIdByHash(hash) {
+  if (!hydratedGallery?.scenes?.length) return null;
+  for (const scene of hydratedGallery.scenes) {
+    for (const image of scene.images) {
+      if (image.spacebyteHash === hash || image.spacebyteEntryId === hash) {
+        return image.spacebyteEntryId || null;
+      }
+    }
+  }
+  return null;
 }
 
 async function handleDownloadAll(response) {
@@ -300,29 +352,55 @@ async function handleDownloadAll(response) {
   );
 }
 
-async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
-  const upstream = await fetch(sourceUrl, { headers: { Authorization: `${SPACEBYTE_AUTH_SCHEME} ${SPACEBYTE_TOKEN}` } });
+async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition, options = {}) {
+  const requestHeaders = {
+    Authorization: `${SPACEBYTE_AUTH_SCHEME} ${SPACEBYTE_TOKEN}`,
+    Accept: "*/*",
+    "User-Agent": "StarzShotsGallery/1.0"
+  };
+  let upstream;
 
-  if (!upstream.ok || !upstream.body) {
-    sendJson(response, upstream.status || 502, { error: `SpaceByte download failed with status ${upstream.status}.` });
-    return;
+  try {
+    upstream = await fetch(sourceUrl, { headers: requestHeaders });
+  } catch (error) {
+    console.error(`Proxy fetch error: ${sourceUrl} => ${error.message}`);
+    if (options.sendErrors !== false) {
+      sendJson(response, 502, { error: "SpaceByte proxy request failed." });
+    }
+    return false;
   }
 
-  const headers = {
+  if (!upstream.ok || !upstream.body) {
+    const bodyText = await upstream.text().catch(() => "");
+    console.error(`Proxy failed: ${sourceUrl} => ${upstream.status} ${bodyText}`);
+    if (options.sendErrors !== false) {
+      sendJson(response, upstream.status || 502, { error: `SpaceByte download failed with status ${upstream.status}.` });
+    }
+    return false;
+  }
+
+  const responseHeaders = {
     "Content-Type": upstream.headers.get("content-type") || "application/octet-stream",
     "Content-Disposition": upstream.headers.get("content-disposition") || defaultDisposition
   };
-  const contentLength = upstream.headers.get("content-length");
-  if (contentLength) headers["Content-Length"] = contentLength;
-
-  response.writeHead(200, headers);
 
   try {
-    await pipeline(Readable.fromWeb(upstream.body), response);
-  } catch (error) {
-    if (error?.code !== "ERR_STREAM_PREMATURE_CLOSE") {
-      console.error("Download stream failed:", error.message);
+    const body = await upstream.arrayBuffer();
+    const buffer = Buffer.from(body);
+    if (!responseHeaders["Content-Length"]) {
+      responseHeaders["Content-Length"] = String(buffer.length);
     }
+    response.writeHead(200, responseHeaders);
+    response.end(buffer);
+    return true;
+  } catch (error) {
+    console.error(`Download proxy failed for ${sourceUrl}:`, error.message);
+    if (!response.headersSent && options.sendErrors !== false) {
+      sendJson(response, 502, { error: "Failed to proxy SpaceByte file download." });
+    } else {
+      response.destroy();
+    }
+    return false;
   }
 }
 
@@ -492,4 +570,14 @@ function loadEnv(filePath) {
   } catch {
     return {};
   }
+}
+
+function loadEnvFromCandidates(paths) {
+  for (const candidate of paths) {
+    const env = loadEnv(candidate);
+    if (Object.keys(env).length > 0) {
+      return env;
+    }
+  }
+  return {};
 }
