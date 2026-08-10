@@ -1,8 +1,8 @@
 ﻿const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { pipeline } = require("stream/promises");
-const { Readable } = require("stream");
 
 const rootDir = __dirname;
 const port = Number(process.env.PORT || 8080);
@@ -744,20 +744,27 @@ async function handleDownloadAllRequest(url, response) {
 }
 
 async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
-  const upstream = await fetch(sourceUrl, {
-    headers: { Authorization: `${spacebyteAuthScheme} ${spacebyteToken}` }
-  });
+  let upstream;
+  try {
+    upstream = await httpsGetStream(sourceUrl, {
+      Authorization: `${spacebyteAuthScheme} ${spacebyteToken}`
+    });
+  } catch (error) {
+    sendJson(response, 502, { error: `SpaceByte download failed: ${error.message}` });
+    return;
+  }
 
-  if (!upstream.ok || !upstream.body) {
-    sendJson(response, upstream.status || 502, { error: `SpaceByte download failed with status ${upstream.status}.` });
+  if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+    upstream.resume();
+    sendJson(response, upstream.statusCode || 502, { error: `SpaceByte download failed with status ${upstream.statusCode}.` });
     return;
   }
 
   const headers = {
-    "Content-Type": upstream.headers.get("content-type") || "application/octet-stream",
-    "Content-Disposition": upstream.headers.get("content-disposition") || defaultDisposition
+    "Content-Type": upstream.headers["content-type"] || "application/octet-stream",
+    "Content-Disposition": upstream.headers["content-disposition"] || defaultDisposition
   };
-  const contentLength = upstream.headers.get("content-length");
+  const contentLength = upstream.headers["content-length"];
   if (contentLength) {
     headers["Content-Length"] = contentLength;
   }
@@ -765,7 +772,7 @@ async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
   response.writeHead(200, headers);
 
   try {
-    await pipeline(Readable.fromWeb(upstream.body), response);
+    await pipeline(upstream, response);
   } catch (error) {
     if (error?.code !== "ERR_STREAM_PREMATURE_CLOSE") {
       console.error("Download stream failed:", error.message);
@@ -1085,29 +1092,83 @@ async function spacebyteJson(url) {
   }
 
   const attempt = async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
-    try {
-      const response = await fetch(url, { headers, signal: controller.signal });
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        const detail = body ? ` - ${body.slice(0, 240)}` : "";
-        throw new Error(`SpaceByte request failed with status ${response.status}${detail}`);
-      }
-      return await response.json();
-    } finally {
-      clearTimeout(timeout);
+    const { statusCode, body } = await httpsGetBuffered(url, headers, 20000);
+    if (statusCode < 200 || statusCode >= 300) {
+      const detail = body ? ` - ${body.slice(0, 240)}` : "";
+      throw new Error(`SpaceByte request failed with status ${statusCode}${detail}`);
     }
+    return JSON.parse(body);
   };
 
   try {
     return await attempt();
   } catch (error) {
-    if (error.name === "AbortError") {
+    if (error.message === "Request timed out") {
       return await attempt();
     }
     throw error;
   }
+}
+
+// Uses Node's classic https client (not fetch/undici) - avoids the WASM llhttp
+// parser that undici lazily compiles, which OOMs under low LVE memory limits.
+function httpsGetBuffered(url, headers, timeoutMs, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        if (redirectsLeft <= 0) {
+          reject(new Error("Too many redirects"));
+          return;
+        }
+        const nextUrl = new URL(response.headers.location, url).toString();
+        const nextHeaders = isSameOrigin(url, nextUrl) ? headers : stripAuthHeader(headers);
+        resolve(httpsGetBuffered(nextUrl, nextHeaders, timeoutMs, redirectsLeft - 1));
+        return;
+      }
+
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({ statusCode: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.setTimeout(timeoutMs, () => request.destroy(new Error("Request timed out")));
+  });
+}
+
+function httpsGetStream(url, headers, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        if (redirectsLeft <= 0) {
+          reject(new Error("Too many redirects"));
+          return;
+        }
+        const nextUrl = new URL(response.headers.location, url).toString();
+        const nextHeaders = isSameOrigin(url, nextUrl) ? headers : stripAuthHeader(headers);
+        resolve(httpsGetStream(nextUrl, nextHeaders, redirectsLeft - 1));
+        return;
+      }
+      resolve(response);
+    });
+    request.on("error", reject);
+  });
+}
+
+function isSameOrigin(urlA, urlB) {
+  try {
+    const a = new URL(urlA);
+    const b = new URL(urlB);
+    return a.origin === b.origin;
+  } catch {
+    return false;
+  }
+}
+
+function stripAuthHeader(headers) {
+  const { Authorization, authorization, ...rest } = headers || {};
+  return rest;
 }
 
