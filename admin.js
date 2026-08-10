@@ -13,7 +13,12 @@ const elements = {
   createError: document.querySelector("#createError"),
   createSuccess: document.querySelector("#createSuccess"),
   eventsError: document.querySelector("#eventsError"),
-  eventsTableBody: document.querySelector("#eventsTableBody")
+  eventsTableBody: document.querySelector("#eventsTableBody"),
+  folderBrowserForm: document.querySelector("#folderBrowserForm"),
+  folderSearch: document.querySelector("#folderSearch"),
+  browseFoldersButton: document.querySelector("#browseFoldersButton"),
+  folderBrowserError: document.querySelector("#folderBrowserError"),
+  folderBrowserResults: document.querySelector("#folderBrowserResults")
 };
 
 async function adminFetch(path, options = {}) {
@@ -186,7 +191,7 @@ async function handleCreateSubmit(event) {
     eventDate: String(form.get("eventDate") || "").trim(),
     clientName: String(form.get("clientName") || "").trim(),
     slug: String(form.get("slug") || "").trim(),
-    spacebyteFolderName: String(form.get("spacebyteFolderName") || "").trim(),
+    spacebyteFolderPath: String(form.get("spacebyteFolderPath") || "").trim(),
     sceneFolderNames: String(form.get("sceneFolderNames") || "")
       .split(",")
       .map((name) => name.trim())
@@ -219,10 +224,63 @@ async function handleCreateSubmit(event) {
   }
 }
 
+async function handleBrowseFolders() {
+  elements.folderBrowserError.textContent = "";
+  elements.folderBrowserResults.innerHTML = "";
+
+  const searchTerm = elements.folderSearch.value.trim().toLowerCase();
+
+  try {
+    elements.folderBrowserError.textContent = "Searching folders...";
+    const response = await adminFetch("/api/admin/browse-spacebyte-folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ searchTerm })
+    });
+    
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "Unable to browse folders");
+    }
+    
+    const payload = await response.json();
+    elements.folderBrowserError.textContent = "";
+    
+    if (!payload.folders || payload.folders.length === 0) {
+      elements.folderBrowserResults.innerHTML = "<p class='muted'>No folders found</p>";
+      return;
+    }
+    
+    const resultsHtml = payload.folders.map((folder) => `
+      <div class="folder-result">
+        <div class="folder-name">${folder.name}</div>
+        <div class="folder-path-small">Path: ${folder.path || 'N/A'}</div>
+        <div class="folder-id-small">ID: ${folder.id}</div>
+        <button type="button" class="copy-path-button" data-path="${folder.path}" data-id="${folder.id}">Copy path</button>
+      </div>
+    `).join("");
+    
+    elements.folderBrowserResults.innerHTML = `<div class="folder-results">${resultsHtml}</div>`;
+    
+    // Add event listeners to copy buttons
+    document.querySelectorAll(".copy-path-button").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const path = btn.getAttribute("data-path") || btn.getAttribute("data-id");
+        elements.createForm.spacebyteFolderPath.value = path;
+        elements.folderBrowserResults.innerHTML = "<p class='success'>Folder path copied to form!</p>";
+      });
+    });
+  } catch (error) {
+    elements.folderBrowserError.textContent = error.message || "Unable to browse folders";
+  }
+}
+
 function bindUiEvents() {
   elements.unlockForm.addEventListener("submit", handleUnlockSubmit);
   elements.createForm.addEventListener("submit", handleCreateSubmit);
   elements.lockButton.addEventListener("click", () => lock(""));
+  elements.browseFoldersButton.addEventListener("click", handleBrowseFolders);
 }
 
 function init() {

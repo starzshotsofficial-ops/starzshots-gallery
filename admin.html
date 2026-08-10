@@ -28,6 +28,18 @@
       </header>
 
       <section class="admin-card">
+        <h2>Find SpaceByte folder</h2>
+        <p>Search for your event folder by name (uses the SpaceByte token configured in .env):</p>
+        <form id="folderBrowserForm" class="admin-form">
+          <label for="folderSearch">Search for folder (e.g., "Ameya" or leave empty to browse root)</label>
+          <input id="folderSearch" name="folderSearch" type="text" />
+          <button type="button" id="browseFoldersButton">Browse folders</button>
+          <p id="folderBrowserError" class="error"></p>
+          <div id="folderBrowserResults"></div>
+        </form>
+      </section>
+
+      <section class="admin-card">
         <h2>Create new event</h2>
         <form id="createForm" class="admin-form">
           <label for="createEventName">Event name</label>
@@ -42,8 +54,8 @@
           <label for="createSlug">Slug (optional, auto-generated from event name)</label>
           <input id="createSlug" name="slug" type="text" />
 
-          <label for="createFolderName">SpaceByte folder name (exact folder name on SpaceByte)</label>
-          <input id="createFolderName" name="spacebyteFolderName" type="text" required />
+          <label for="createFolderPath">SpaceByte folder path (e.g., "Events/Wedding" or folder ID)</label>
+          <input id="createFolderPath" name="spacebyteFolderPath" type="text" placeholder="Paste folder path or ID here" required />
 
           <label for="createSceneFolders">Scene folder names (comma separated)</label>
           <input id="createSceneFolders" name="sceneFolderNames" type="text" value="T.Photo, C.Photo" />

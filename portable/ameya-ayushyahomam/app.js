@@ -1,4 +1,4 @@
-const gallerySlug = new URLSearchParams(window.location.search).get("event") || "nakshathra-half-saree-function";
+const gallerySlug = "ameya-ayushyahomam";
 const gallerySource = `/api/galleries/${gallerySlug}`;
 const galleryMetaSource = `/api/galleries/${gallerySlug}/meta`;
 

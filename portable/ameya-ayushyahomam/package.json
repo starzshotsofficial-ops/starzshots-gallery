@@ -1,0 +1,23 @@
+{
+  "name": "starzshots-ameya-ayushyahomam-portable",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portable, single-event Starz Shots Gallery for Ameya Ayushyahomam. No installation required.",
+  "main": "server.js",
+  "bin": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "pkg . --targets node18-win-x64 --output dist/StarzShots-AmeyaAyushyahomam.exe"
+  },
+  "pkg": {
+    "assets": [
+      "index.html",
+      "styles.css",
+      "app.js",
+      ".env"
+    ]
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

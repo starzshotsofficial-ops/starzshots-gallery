@@ -84,6 +84,12 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/admin/browse-spacebyte-folders") {
+      if (!authorizeAdmin(request, response)) return;
+      await handleBrowseSpaceByteFolders(request, response);
+      return;
+    }
+
     if (request.method === "PUT" && /^\/api\/admin\/events\/[^/]+$/.test(url.pathname)) {
       if (!authorizeAdmin(request, response)) return;
       await handleUpdateAdminEvent(url, request, response);
@@ -226,6 +232,37 @@ async function handleCreateAdminEvent(request, response) {
       clientName: newGallery.clientName
     }
   });
+}
+
+async function handleBrowseSpaceByteFolders(request, response) {
+  const body = await readJsonBody(request);
+  const searchTerm = String(body.searchTerm || "").trim().toLowerCase();
+  const parentId = String(body.parentId || "").trim();
+
+  if (!spacebyteToken) {
+    sendJson(response, 503, { error: "SPACEBYTE_TOKEN is not configured in .env." });
+    return;
+  }
+
+  try {
+    const entries = await spacebyteListAll(parentId ? { folderId: parentId } : {});
+    const folders = entries.filter((entry) => entry.type === "folder");
+    const filtered = searchTerm
+      ? folders.filter((folder) => String(folder.name || "").toLowerCase().includes(searchTerm))
+      : folders.slice(0, 30);
+
+    sendJson(response, 200, {
+      folders: filtered.map((folder) => ({
+        id: String(folder.id || ""),
+        name: String(folder.name || ""),
+        path: String(folder.path || "")
+      }))
+    });
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error.message || "Unable to browse SpaceByte folders."
+    });
+  }
 }
 
 async function handleUpdateAdminEvent(url, request, response) {
@@ -818,6 +855,7 @@ async function hydrateGalleryFromSpaceByte(gallery) {
         const sceneEntries = await spacebyteListAll({ folderId: sceneFolder.id });
         const images = sceneEntries
           .filter((entry) => entry.type === "image" || imageExtensions.has(String(entry.extension || "").toLowerCase()))
+          .sort((a, b) => compareFilenamesNatural(a.name, b.name))
           .map((entry) => toGalleryImage(sceneName, entry));
 
         return {
@@ -839,6 +877,10 @@ async function hydrateGalleryFromSpaceByte(gallery) {
     apiDownloadAllUrl: `/api/galleries/${encodeURIComponent(gallery.slug)}/download-all`,
     scenes
   };
+}
+
+function compareFilenamesNatural(a, b) {
+  return String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
 }
 
 function toGalleryImage(sceneName, entry) {

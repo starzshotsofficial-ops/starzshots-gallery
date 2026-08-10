@@ -36,6 +36,41 @@
       ],
       "scenes": [],
       "coverImage": ""
+    },
+    {
+      "slug": "ameya-ayushyahomam",
+      "eventName": "Ameya Ayushyahomam",
+      "eventDate": "2026-08-07",
+      "clientName": "Venkatraman",
+      "spacebyteFolderPath": "11320800",
+      "spacebyteRootFolderId": "",
+      "coverImage": "",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "0708",
+          "role": "client",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ],
+      "spacebyteFolderName": "",
+      "sceneFolderNames": [
+        "Photos"
+      ]
     }
   ]
 }
