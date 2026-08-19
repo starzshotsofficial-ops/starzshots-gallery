@@ -1,0 +1,6 @@
+.env
+portable/**/.env
+portable/**/dist/
+portable/**/node_modules/
+spacebyte-api-ocr.txt
+.cache/

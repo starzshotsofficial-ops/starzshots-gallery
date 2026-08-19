@@ -1,0 +1,106 @@
+{
+  "galleries": [
+    {
+      "eventName": "Arjun Ayush",
+      "eventDate": "2026-08-18",
+      "clientName": "Arjun",
+      "slug": "arjun-ayush",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "1808",
+          "role": "client",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ],
+      "googleDriveFolderName": "Arjun Ayush",
+      "scenes": [],
+      "coverImage": "",
+      "sceneFolderNames": [
+        "Ayush"
+      ]
+    },
+    {
+      "slug": "ameya-ayushyahomam",
+      "eventName": "Ameya Ayushyahomam",
+      "eventDate": "2026-08-07",
+      "clientName": "Venkatraman",
+      "googleDriveFolderName": "Ameya Ayushyahomam",
+      "coverImage": "",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "0708",
+          "role": "client",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ],
+      "spacebyteFolderName": "",
+      "sceneFolderNames": [
+        "Photos"
+      ]
+    },
+    {
+      "slug": "sairam-and-vanamala",
+      "eventName": "Sairam and Vanamala",
+      "eventDate": "2026-08-15",
+      "clientName": "Sairam",
+      "googleDriveFolderName": "Sairam and Vanamala",
+      "coverImage": "",
+      "accessCodes": [
+        {
+          "label": "Client",
+          "code": "1508",
+          "role": "client",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": true
+          }
+        },
+        {
+          "label": "Guest",
+          "code": "guest",
+          "role": "guest",
+          "permissions": {
+            "canFavorite": true,
+            "canDownloadSingle": true,
+            "canDownloadAll": false
+          }
+        }
+      ],
+      "spacebyteFolderName": "",
+      "sceneFolderNames": [
+        "Outdoor"
+      ]
+    }
+  ]
+}

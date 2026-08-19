@@ -1,0 +1,65 @@
+{
+  "submissions": [
+    {
+      "submissionId": "1786111673948-2152",
+      "slug": "nakshathra-half-saree",
+      "eventName": "Nakshathra Half Saree Function",
+      "viewerId": "9000000001",
+      "viewerLabel": "Guest One",
+      "role": "guest",
+      "submittedAt": "2026-08-07T14:07:53.948Z",
+      "favorites": [
+        {
+          "scene": "T.Photo",
+          "sceneIndex": 1,
+          "filename": "demo1.jpg",
+          "spacebyteEntryId": "111",
+          "spacebyteHash": "hash1"
+        },
+        {
+          "scene": "C.Photo",
+          "sceneIndex": 2,
+          "filename": "demo2.jpg",
+          "spacebyteEntryId": "222",
+          "spacebyteHash": "hash2"
+        }
+      ]
+    },
+    {
+      "submissionId": "1786197259316-193",
+      "slug": "rahul-priya-wedding",
+      "eventName": "Rahul & Priya Wedding",
+      "viewerId": "guest@test.com",
+      "viewerLabel": "Guest",
+      "role": "guest",
+      "submittedAt": "2026-08-08T13:54:19.316Z",
+      "favorites": [
+        {
+          "scene": "Ceremony",
+          "sceneIndex": 1,
+          "filename": "ceremony-001.jpg",
+          "spacebyteEntryId": "entry_ceremony_001",
+          "spacebyteHash": "hash_ceremony_001"
+        }
+      ]
+    },
+    {
+      "submissionId": "1786198844300-484",
+      "slug": "nakshathra-half-saree-function",
+      "eventName": "Nakshathra Half Saree Function",
+      "viewerId": "guest@test.com",
+      "viewerLabel": "Guest",
+      "role": "guest",
+      "submittedAt": "2026-08-08T14:20:44.300Z",
+      "favorites": [
+        {
+          "scene": "T.Photo",
+          "sceneIndex": 1,
+          "filename": "1Y9A5510.JPG",
+          "spacebyteEntryId": "10960978",
+          "spacebyteHash": "hash1"
+        }
+      ]
+    }
+  ]
+}
