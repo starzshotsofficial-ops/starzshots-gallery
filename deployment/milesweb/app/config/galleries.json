@@ -71,41 +71,6 @@
       "sceneFolderNames": [
         "Photos"
       ]
-    },
-    {
-      "slug": "sairam-and-vanamala",
-      "eventName": "Sairam and Vanamala",
-      "eventDate": "2026-08-15",
-      "clientName": "Sairam",
-      "spacebyteFolderPath": "11652041",
-      "spacebyteRootFolderId": "",
-      "coverImage": "",
-      "accessCodes": [
-        {
-          "label": "Client",
-          "code": "1508",
-          "role": "client",
-          "permissions": {
-            "canFavorite": true,
-            "canDownloadSingle": true,
-            "canDownloadAll": true
-          }
-        },
-        {
-          "label": "Guest",
-          "code": "guest",
-          "role": "guest",
-          "permissions": {
-            "canFavorite": true,
-            "canDownloadSingle": true,
-            "canDownloadAll": false
-          }
-        }
-      ],
-      "spacebyteFolderName": "",
-      "sceneFolderNames": [
-        "Outdoor"
-      ]
     }
   ]
 }

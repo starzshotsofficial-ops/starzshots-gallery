@@ -2,20 +2,27 @@
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { pipeline } = require("stream/promises");
+const sharp = require("sharp");
 
 const rootDir = __dirname;
-const port = Number(process.env.PORT || 3001);
 // Merge .env (local dev) with process.env, which takes precedence (Render/host-provided vars)
 const env = { ...loadEnv(path.join(rootDir, ".env")), ...process.env };
+const port = Number(env.PORT || 8080);
 const galleriesConfigPath = path.join(rootDir, "config", "galleries.json");
 const config = readJson(galleriesConfigPath) || { galleries: [] };
 const favoritesStorePath = path.join(rootDir, "data", "favorites-submissions.json");
+const thumbnailCacheDir = path.join(rootDir, "data", "thumbnail-cache");
+const thumbnailJobs = new Map();
+let activeThumbnailJobs = 0;
+const thumbnailQueue = [];
 
 const spacebyteBaseUrl = env.SPACEBYTE_BASE_URL || "https://spacebyte.in/api/v1";
 const spacebyteToken = env.SPACEBYTE_TOKEN || "";
 const spacebyteAuthScheme = String(env.SPACEBYTE_AUTH_SCHEME || "Bearer").trim() || "Bearer";
 const adminToken = env.ADMIN_TOKEN || "";
+const appBasePath = normalizeAppBasePath(env.APP_BASE_PATH || "/");
 const allowInsecureTls = String(env.SPACEBYTE_ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
 const galleryHydrationCache = new Map();
@@ -41,9 +48,26 @@ const contentTypes = {
   ".webp": "image/webp"
 };
 
+// Only these files are intended to be reachable directly from the browser.
+// Keeping this allow-list prevents configuration, submission data, and .env
+// files from ever being exposed by the static-file fallback.
+const publicFiles = new Set([
+  "index.html",
+  "admin.html",
+  "app.js",
+  "admin.js",
+  "styles.css"
+]);
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+    url.pathname = stripAppBasePath(url.pathname);
+
+    if (request.method === "GET" && url.pathname === "/healthz") {
+      sendJson(response, 200, { ok: true });
+      return;
+    }
 
     if (request.method === "GET" && url.pathname === "/api/admin/events") {
       if (!authorizeAdmin(request, response)) return;
@@ -131,6 +155,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname.startsWith("/api/thumbnails/")) {
+      await handleThumbnail(url, response);
+      return;
+    }
+
     serveStatic(url.pathname, response);
   } catch (error) {
     if (response.headersSent) {
@@ -141,7 +170,7 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, () => {
+server.listen(port, "0.0.0.0", () => {
   ensureFavoritesStore();
   console.log(`Starz Shots Gallery running at http://localhost:${port}`);
 });
@@ -244,8 +273,17 @@ async function handleBrowseSpaceByteFolders(request, response) {
     return;
   }
 
+  if (!parentId && !searchTerm) {
+    sendJson(response, 400, { error: "Enter at least part of a folder name. Browsing the full SpaceByte root is disabled because it can time out." });
+    return;
+  }
+
   try {
-    const entries = await spacebyteListAll(parentId ? { folderId: parentId } : {});
+    // Keyword searches are already filtered by SpaceByte; paging through the
+    // whole account here makes broad searches time out.
+    const entries = parentId
+      ? await spacebyteListAll({ folderId: parentId })
+      : await spacebyteSearchFolders(searchTerm);
     const folders = entries.filter((entry) => entry.type === "folder");
     const filtered = searchTerm
       ? folders.filter((folder) => String(folder.name || "").toLowerCase().includes(searchTerm))
@@ -711,8 +749,49 @@ async function handleFileDownload(url, response) {
   await proxySpaceByteDownload(
     `${spacebyteBaseUrl}/file-entries/download/${encodeURIComponent(hash)}`,
     response,
-    "inline"
+    "inline",
+    mimeTypeFromFilename(url.searchParams.get("name"))
   );
+}
+
+async function handleThumbnail(url, response) {
+  if (!spacebyteToken) return sendJson(response, 503, { error: "SPACEBYTE_TOKEN is not configured." });
+  const hash = decodeURIComponent(url.pathname.split("/").filter(Boolean)[2] || "").trim();
+  if (!hash) return sendJson(response, 400, { error: "Missing file hash." });
+  const cacheFile = path.join(thumbnailCacheDir, `${crypto.createHash("sha256").update(hash).digest("hex")}.webp`);
+  try {
+    if (!fs.existsSync(cacheFile)) await getOrCreateThumbnail(hash, cacheFile);
+    const stat = fs.statSync(cacheFile);
+    response.writeHead(200, { "Content-Type": "image/webp", "Content-Length": stat.size, "Cache-Control": "public, max-age=31536000, immutable" });
+    fs.createReadStream(cacheFile).pipe(response);
+  } catch (error) {
+    sendJson(response, 502, { error: `Thumbnail generation failed: ${error.message}` });
+  }
+}
+
+function getOrCreateThumbnail(hash, cacheFile) {
+  if (!thumbnailJobs.has(cacheFile)) {
+    thumbnailJobs.set(cacheFile, scheduleThumbnail(async () => {
+      fs.mkdirSync(thumbnailCacheDir, { recursive: true });
+      if (fs.existsSync(cacheFile)) return;
+      const source = await httpsGetBuffer(`${spacebyteBaseUrl}/file-entries/download/${encodeURIComponent(hash)}`, { Authorization: `${spacebyteAuthScheme} ${spacebyteToken}` }, 90000);
+      if (source.statusCode < 200 || source.statusCode >= 300) throw new Error(`SpaceByte returned ${source.statusCode}`);
+      const thumbnail = await sharp(source.body).rotate().resize({ width: 1000, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+      fs.writeFileSync(cacheFile, thumbnail);
+    }).finally(() => thumbnailJobs.delete(cacheFile)));
+  }
+  return thumbnailJobs.get(cacheFile);
+}
+
+function scheduleThumbnail(task) {
+  return new Promise((resolve, reject) => { thumbnailQueue.push({ task, resolve, reject }); drainThumbnailQueue(); });
+}
+
+function drainThumbnailQueue() {
+  while (activeThumbnailJobs < 3 && thumbnailQueue.length) {
+    const next = thumbnailQueue.shift(); activeThumbnailJobs += 1;
+    Promise.resolve().then(next.task).then(next.resolve, next.reject).finally(() => { activeThumbnailJobs -= 1; drainThumbnailQueue(); });
+  }
 }
 
 async function handleDownloadAllRequest(url, response) {
@@ -743,7 +822,7 @@ async function handleDownloadAllRequest(url, response) {
   );
 }
 
-async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
+async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition, contentTypeOverride = "") {
   let upstream;
   try {
     upstream = await httpsGetStream(sourceUrl, {
@@ -761,9 +840,12 @@ async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
   }
 
   const headers = {
-    "Content-Type": upstream.headers["content-type"] || "application/octet-stream",
-    "Content-Disposition": upstream.headers["content-disposition"] || defaultDisposition
+    "Content-Type": contentTypeOverride || upstream.headers["content-type"] || "application/octet-stream",
+    "Content-Disposition": defaultDisposition
   };
+  if (defaultDisposition === "inline") {
+    headers["Cache-Control"] = "public, max-age=31536000, immutable";
+  }
   const contentLength = upstream.headers["content-length"];
   if (contentLength) {
     headers["Content-Length"] = contentLength;
@@ -778,6 +860,11 @@ async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition) {
       console.error("Download stream failed:", error.message);
     }
   }
+}
+
+function mimeTypeFromFilename(filename) {
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  return contentTypes[extension] || "";
 }
 
 function resolveAccess(gallery, viewerId, accessCode) {
@@ -894,15 +981,18 @@ function toGalleryImage(sceneName, entry) {
   const hash = String(entry.hash || "");
   const filename = String(entry.name || entry.file_name || `image-${entry.id}.jpg`);
   const id = `${toSlug(sceneName)}-${entry.id}`;
+  const fileUrl = `/api/files/${encodeURIComponent(hash)}?name=${encodeURIComponent(filename)}`;
 
   return {
     id,
     filename,
     spacebyteEntryId: String(entry.id || ""),
     spacebyteHash: hash,
-    url: `/api/files/${encodeURIComponent(hash)}`,
-    thumbnailUrl: `/api/files/${encodeURIComponent(hash)}`,
-    downloadUrl: `/api/files/${encodeURIComponent(hash)}`
+    url: fileUrl,
+    // Streaming is reliable on a low-memory shared host; re-encoding large
+    // SpaceByte photos as thumbnails can otherwise time out.
+    thumbnailUrl: fileUrl,
+    downloadUrl: fileUrl
   };
 }
 
@@ -938,34 +1028,36 @@ async function resolveEventFolder(gallery) {
 }
 
 async function spacebyteListAll(filters) {
-  const first = await spacebyteFetchPage(filters, 1);
-  const items = Array.isArray(first.data) ? [...first.data] : [];
+  const items = [];
+  const seenIds = new Set();
+  let page = 1;
 
-  let nextPage = first.next_page ? Number(first.next_page) : null;
-  const concurrency = 10;
-
-  while (nextPage) {
-    const pagesToFetch = Array.from({ length: concurrency }, (_, index) => nextPage + index);
-    const batch = await Promise.all(
-      pagesToFetch.map((page) => spacebyteFetchPage(filters, page).catch(() => ({ data: [], next_page: null })))
-    );
-
-    let highestNextPage = null;
-    for (const payload of batch) {
-      const pageItems = Array.isArray(payload.data) ? payload.data : [];
-      if (!pageItems.length) continue;
-      items.push(...pageItems);
-
-      const candidate = payload.next_page ? Number(payload.next_page) : null;
-      if (Number.isFinite(candidate) && (highestNextPage === null || candidate > highestNextPage)) {
-        highestNextPage = candidate;
-      }
+  // Follow next_page exactly. Speculative parallel pages can duplicate the
+  // terminal page and overload the SpaceByte API.
+  while (page && page <= 500) {
+    const payload = await spacebyteFetchPage(filters, page);
+    for (const item of Array.isArray(payload.data) ? payload.data : []) {
+      const key = String(item.id || item.hash || "");
+      if (!key || seenIds.has(key)) continue;
+      seenIds.add(key);
+      items.push(item);
     }
-
-    nextPage = highestNextPage;
+    const nextPage = Number(payload.next_page);
+    page = Number.isFinite(nextPage) && nextPage > page ? nextPage : null;
   }
-
   return items;
+}
+
+async function spacebyteSearchFolders(searchTerm) {
+  const entries = [];
+  let page = 1;
+  for (let fetched = 0; page && fetched < 3 && entries.length < 30; fetched += 1) {
+    const payload = await spacebyteFetchPage({ query: searchTerm }, page);
+    entries.push(...(Array.isArray(payload.data) ? payload.data : []));
+    const nextPage = Number(payload.next_page);
+    page = Number.isFinite(nextPage) && nextPage > page ? nextPage : null;
+  }
+  return entries;
 }
 
 async function spacebyteFetchPage(filters, page) {
@@ -981,6 +1073,9 @@ async function spacebyteFetchPage(filters, page) {
   }
   if (filters?.path) {
     params.set("path", String(filters.path));
+  }
+  if (filters?.query) {
+    params.set("query", String(filters.query));
   }
 
   return spacebyteJson(`${spacebyteBaseUrl}/drive/file-entries?${params.toString()}`);
@@ -1042,10 +1137,23 @@ function sendJson(response, statusCode, payload) {
 }
 
 function serveStatic(urlPath, response) {
-  const normalized = decodeURIComponent(urlPath.split("?")[0] || "/");
-  let filePath = normalized === "/" ? path.join(rootDir, "index.html") : path.join(rootDir, normalized.slice(1));
+  let normalized;
+  try {
+    normalized = decodeURIComponent(urlPath.split("?")[0] || "/");
+  } catch {
+    sendJson(response, 400, { error: "Invalid path." });
+    return;
+  }
 
-  if (!filePath.startsWith(rootDir)) {
+  const publicName = normalized === "/" ? "index.html" : normalized.replace(/^\/+/, "");
+  if (!publicFiles.has(publicName)) {
+    sendJson(response, 404, { error: "Not found." });
+    return;
+  }
+
+  const filePath = path.resolve(rootDir, publicName);
+  const relativePath = path.relative(rootDir, filePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
     sendJson(response, 400, { error: "Invalid path." });
     return;
   }
@@ -1058,7 +1166,25 @@ function serveStatic(urlPath, response) {
   const ext = path.extname(filePath).toLowerCase();
   const contentType = contentTypes[ext] || "application/octet-stream";
   response.writeHead(200, { "Content-Type": contentType });
-  response.end(fs.readFileSync(filePath));
+  const content = fs.readFileSync(filePath);
+  if (ext === ".html") {
+    response.end(content.toString("utf8").replace('<base href="/">', `<base href="${appBasePath}">`));
+    return;
+  }
+  response.end(content);
+}
+
+function normalizeAppBasePath(value) {
+  const cleaned = String(value || "").trim().replace(/^\/+|\/+$/g, "");
+  return cleaned ? `/${cleaned}/` : "/";
+}
+
+function stripAppBasePath(pathname) {
+  if (appBasePath === "/") return pathname;
+  const mountPath = appBasePath.slice(0, -1);
+  if (pathname === mountPath) return "/";
+  if (pathname.startsWith(`${mountPath}/`)) return pathname.slice(mountPath.length) || "/";
+  return pathname;
 }
 
 function loadEnv(filePath) {
@@ -1157,6 +1283,25 @@ function httpsGetStream(url, headers, redirectsLeft = 5) {
   });
 }
 
+function httpsGetBuffer(url, headers, timeoutMs, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        if (redirectsLeft <= 0) return reject(new Error("Too many redirects"));
+        const nextUrl = new URL(response.headers.location, url).toString();
+        return resolve(httpsGetBuffer(nextUrl, isSameOrigin(url, nextUrl) ? headers : stripAuthHeader(headers), timeoutMs, redirectsLeft - 1));
+      }
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({ statusCode: response.statusCode, body: Buffer.concat(chunks) }));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.setTimeout(timeoutMs, () => request.destroy(new Error("Request timed out")));
+  });
+}
+
 function isSameOrigin(urlA, urlB) {
   try {
     const a = new URL(urlA);
@@ -1171,4 +1316,3 @@ function stripAuthHeader(headers) {
   const { Authorization, authorization, ...rest } = headers || {};
   return rest;
 }
-

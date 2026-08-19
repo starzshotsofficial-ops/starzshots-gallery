@@ -1,0 +1,17 @@
+{
+  "name": "starzshots-gallery",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Starz Shots Gallery web app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
