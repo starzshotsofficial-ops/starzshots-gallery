@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Starz Shots Gallery — Admin</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.extra.css" />
+</head>
+<body>
+  <main class="admin-page">
+    <section class="admin-panel" data-view="unlock">
+      <p class="brand">Starz Shots Gallery — Admin</p>
+      <h1>Enter admin token</h1>
+      <form id="unlockForm">
+        <label for="adminToken">Admin token</label>
+        <input id="adminToken" name="adminToken" type="password" autocomplete="off" required />
+        <div class="access-row">
+          <button type="submit">Unlock</button>
+        </div>
+        <p id="unlockError" class="error"></p>
+      </form>
+    </section>
+
+    <section class="admin-content hidden" data-view="content">
+      <header class="admin-header">
+        <p class="brand">Starz Shots Gallery — Admin</p>
+        <button type="button" id="lockButton" class="icon-button">Lock</button>
+      </header>
+
+      <section class="admin-card">
+        <h2>Find Google Drive folder</h2>
+        <p>Search folders under the configured Starz Shots root folder.</p>
+        <form id="folderBrowserForm" class="admin-form">
+          <label for="folderSearch">Search for folder (leave empty to list the root)</label>
+          <input id="folderSearch" name="folderSearch" type="text" />
+          <button type="button" id="browseFoldersButton">Browse folders</button>
+          <p id="folderBrowserError" class="error"></p>
+          <div id="folderBrowserResults"></div>
+        </form>
+      </section>
+
+      <section class="admin-card">
+        <h2>Create new event</h2>
+        <p class="muted">
+          Saving an event immediately starts a background job that indexes the Drive folders and caches a
+          low-resolution copy of every photo under <code>data/thumbnails/&lt;event-slug&gt;/&lt;scene&gt;/</code>.
+        </p>
+        <form id="createForm" class="admin-form">
+          <label for="createEventName">Event name</label>
+          <input id="createEventName" name="eventName" type="text" required />
+
+          <label for="createEventDate">Event date</label>
+          <input id="createEventDate" name="eventDate" type="date" required />
+
+          <label for="createClientName">Client name</label>
+          <input id="createClientName" name="clientName" type="text" required />
+
+          <label for="createSlug">Slug (optional, auto-generated from event name)</label>
+          <input id="createSlug" name="slug" type="text" />
+
+          <label for="createFolderPath">Google Drive folder name</label>
+          <input id="createFolderPath" name="googleDriveFolderName" type="text" placeholder="Exact event folder name" required />
+
+          <label for="createSceneFolders">Scene folder names (comma separated, blank = every sub-folder)</label>
+          <input id="createSceneFolders" name="sceneFolderNames" type="text" value="T.Photo, C.Photo" />
+
+          <label for="createCoverImage">Cover image URL (optional)</label>
+          <input id="createCoverImage" name="coverImage" type="text" />
+
+          <label for="createClientCode">Client access code</label>
+          <input id="createClientCode" name="clientCode" type="text" required />
+
+          <label for="createGuestCode">Guest access code</label>
+          <input id="createGuestCode" name="guestCode" type="text" value="guest" required />
+
+          <div class="access-row">
+            <button type="submit">Create event</button>
+          </div>
+          <p id="createError" class="error"></p>
+          <p id="createSuccess" class="success"></p>
+        </form>
+      </section>
+
+      <section class="admin-card">
+        <h2>Existing events</h2>
+        <p id="eventsError" class="error"></p>
+        <div class="admin-table-wrap">
+          <table class="admin-table" id="eventsTable">
+            <thead>
+              <tr>
+                <th>Event name</th>
+                <th>Event date</th>
+                <th>Client name</th>
+                <th>Google Drive folder</th>
+                <th>Scene folders</th>
+                <th>Cover image URL</th>
+                <th>Client code</th>
+                <th>Guest code</th>
+                <th>Cache</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="eventsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

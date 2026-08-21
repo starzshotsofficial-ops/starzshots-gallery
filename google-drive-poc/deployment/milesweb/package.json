@@ -1,0 +1,14 @@
+{
+  "name": "starzshots-gallery-google-drive",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Starz Shots Gallery - Google Drive backed gallery with a local thumbnail cache (MilesWeb deployment package)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

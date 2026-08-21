@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Starz Shots Gallery</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.extra.css" />
+</head>
+<body>
+  <main>
+    <section class="access-screen" data-view="access">
+      <div class="access-panel">
+        <p class="brand">Starz Shots Gallery</p>
+        <h1 id="accessTitle">Enter your gallery access</h1>
+        <p id="accessMeta" class="muted">Loading event details…</p>
+        <form id="accessForm">
+          <label for="viewerId">Your name or email</label>
+          <input id="viewerId" name="viewerId" type="text" autocomplete="name" required />
+          <label for="accessCode">Access code</label>
+          <input id="accessCode" name="accessCode" type="password" autocomplete="one-time-code" required />
+          <div class="access-row">
+            <button type="submit">Open gallery</button>
+          </div>
+          <p id="accessError" class="error"></p>
+          <p class="access-help">Use the code provided by your photographer to view and save your photos.</p>
+        </form>
+      </div>
+    </section>
+
+    <section class="gallery-screen hidden" data-view="gallery">
+      <div class="hero">
+        <img id="coverImage" src="" alt="Gallery cover" />
+        <div class="hero-overlay">
+          <div>
+            <p class="brand">Starz Shots Gallery</p>
+            <h1 id="eventName">Event name</h1>
+            <p id="eventDate" class="muted">Event date</p>
+            <p id="clientName" class="muted">Client name</p>
+          </div>
+          <p id="visitorRole" class="role-badge">Role</p>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="scene-tabs" id="sceneTabs"></div>
+        <div class="actions">
+          <button type="button" id="showAll" class="tab active">All</button>
+          <button type="button" id="showFavorites" class="tab">Favorites</button>
+          <span id="favoriteCount" class="role-badge">0</span>
+          <button type="button" id="downloadAll" class="icon-button">Download all</button>
+          <button type="button" id="downloadFavoritesCsv" class="icon-button">Download favorites</button>
+        </div>
+      </div>
+      <p id="syncNotice" class="sync-notice hidden"></p>
+      <section class="gallery-grid" id="galleryGrid"></section>
+      <div id="gridSentinel" class="grid-sentinel"></div>
+      <p id="gridStatus" class="grid-status muted"></p>
+    </section>
+  </main>
+
+  <dialog id="lightbox">
+    <button id="closeLightbox" class="close-button" type="button">×</button>
+    <button id="previousImage" class="lightbox-nav previous" type="button">←</button>
+    <button id="nextImage" class="lightbox-nav next" type="button">→</button>
+    <img id="lightboxImage" alt="Photo preview" />
+    <footer>
+      <div>
+        <p id="lightboxScene" class="muted">Scene</p>
+        <p id="lightboxFilename" class="muted">Filename</p>
+      </div>
+      <div class="dialog-actions">
+        <button id="lightboxFavorite" type="button">Favorite</button>
+        <a id="lightboxDownload" class="download-button" download>Download</a>
+      </div>
+    </footer>
+  </dialog>
+
+  <dialog id="downloadDialog" class="download-dialog">
+    <h2>Download all photos</h2>
+    <p class="muted">Large galleries are split into parts so each download stays reliable. Start one part at a time.</p>
+    <div id="downloadParts" class="download-parts"></div>
+    <div class="dialog-actions">
+      <button id="closeDownloadDialog" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
