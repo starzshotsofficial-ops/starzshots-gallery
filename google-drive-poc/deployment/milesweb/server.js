@@ -16,6 +16,7 @@ const { createSyncWorker } = require("./lib/sync-worker");
 const { createSessionManager, timingSafeEqual } = require("./lib/session");
 const { ZipWriter } = require("./lib/zip-writer");
 const { sendJson, serveStatic, readJsonBody, SECURITY_HEADERS } = require("./lib/http-utils");
+const { createFaceRecognition } = require("./face_recognition");
 
 const rootDir = __dirname;
 const env = { ...loadEnvFile(path.join(rootDir, ".env")), ...process.env };
@@ -45,13 +46,30 @@ const sync = createSyncWorker({
   drive,
   thumbnailSize,
   concurrency: readNumber(env, "SYNC_CONCURRENCY", 4),
-  refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360)
+  refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360),
+  onGalleryReady: (slug) => face.onSyncComplete(slug)
 });
 const sessions = createSessionManager({
   secret: resolveSessionSecret(),
   ttlHours: readNumber(env, "SESSION_TTL_HOURS", 12),
   basePath,
   secureCookies: readBoolean(env, "SECURE_COOKIES", true)
+});
+
+const face = createFaceRecognition({
+  cache,
+  drive,
+  config,
+  dataDir,
+  basePath,
+  thumbnailSize,
+  sendJson,
+  readJsonBody,
+  SECURITY_HEADERS,
+  options: {
+    detector: readString(env, "FACE_DETECTOR", "tiny"),
+    matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.5")) || 0.5
+  }
 });
 
 const server = http.createServer(async (request, response) => {
@@ -81,6 +99,10 @@ async function route(request, response) {
     if (segments[1] === "admin") return routeAdmin(request, response, segments.slice(2), url);
     if (segments[1] === "galleries") return routeGallery(request, response, segments.slice(2), url);
     return sendJson(response, 404, { error: "Not found." });
+  }
+
+  if (request.method === "GET" && (pathname === "/find-my-photos" || pathname.startsWith("/find-my-photos/"))) {
+    return face.handlePage(request, response, url);
   }
 
   if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed." });
@@ -113,6 +135,8 @@ async function routeGallery(request, response, segments, url) {
 
   const session = sessions.read(request, slug);
   if (!session) return sendJson(response, 401, { error: "Enter your access code to view this gallery." });
+
+  if (action === "face") return face.handleGallery(request, response, gallery, session, segments.slice(2), url);
 
   if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
   if (request.method === "GET" && action === "images") return handleImages(response, gallery, url);

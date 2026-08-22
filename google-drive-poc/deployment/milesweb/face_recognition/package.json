@@ -1,0 +1,18 @@
+{
+  "name": "starzshots-face-recognition",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Selfie based face matching for the Starz Shots Gallery (pure-JS, shared-hosting friendly).",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node download-models.js"
+  },
+  "dependencies": {
+    "@vladmandic/face-api": "^1.7.15",
+    "jpeg-js": "^0.4.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

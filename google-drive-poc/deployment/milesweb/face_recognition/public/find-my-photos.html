@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Find my photos · Starz Shots Gallery</title>
+  <link rel="stylesheet" href="find-my-photos/app.css" />
+</head>
+<body>
+  <main class="face-page">
+    <header class="face-header">
+      <div>
+        <p class="brand">Starz Shots Gallery</p>
+        <h1 id="eventName">Find my photos</h1>
+        <p id="eventMeta" class="muted">Upload a selfie and we'll gather every photo you appear in.</p>
+      </div>
+      <a id="backToGallery" class="ghost-button" href="#">Back to gallery</a>
+    </header>
+
+    <section class="uploader" id="uploader">
+      <div class="upload-card">
+        <div class="preview" id="preview" aria-hidden="true"></div>
+        <div class="upload-copy">
+          <h2>Upload a selfie</h2>
+          <p class="muted">Use a clear, front-facing photo. It stays private and is only used to find your matches.</p>
+          <label class="file-button" for="selfieInput">Choose a selfie</label>
+          <input id="selfieInput" type="file" accept="image/*" capture="user" hidden />
+          <label class="sensitivity">
+            Match sensitivity
+            <select id="sensitivity">
+              <option value="0.45">Strict (fewer, surer matches)</option>
+              <option value="0.5" selected>Normal</option>
+              <option value="0.55">Loose (more matches)</option>
+            </select>
+          </label>
+          <button id="searchButton" type="button" disabled>Find my photos</button>
+        </div>
+      </div>
+      <p id="statusMessage" class="status-message"></p>
+      <div class="progress hidden" id="progress">
+        <div class="progress-bar"><span id="progressFill"></span></div>
+        <p id="progressLabel" class="muted"></p>
+      </div>
+    </section>
+
+    <section class="results hidden" id="results">
+      <div class="results-head">
+        <h2 id="resultsTitle">Your matches</h2>
+        <p id="resultsCount" class="muted"></p>
+      </div>
+      <div class="results-grid" id="resultsGrid"></div>
+    </section>
+  </main>
+
+  <script src="find-my-photos/app.js"></script>
+</body>
+</html>
