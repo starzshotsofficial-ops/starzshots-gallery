@@ -20,7 +20,9 @@ const { sendJson, serveStatic, readJsonBody, SECURITY_HEADERS } = require("./lib
 const rootDir = __dirname;
 const env = { ...loadEnvFile(path.join(rootDir, ".env")), ...process.env };
 
-const port = readNumber(env, "PORT", 3002);
+// An empty PORT coerces to 0, so only accept a real listening port here.
+const port = readNumber(env, "PORT", 0) || 3001;
+const host = readString(env, "HOST", "0.0.0.0");
 const basePath = normalizeBasePath(readString(env, "APP_BASE_PATH"));
 const dataDir = path.resolve(rootDir, readString(env, "DATA_DIR", "./data"));
 const adminToken = readString(env, "ADMIN_TOKEN");
@@ -61,8 +63,8 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`Starz Shots Gallery listening on port ${port} (base path '${basePath || "/"}')`);
+server.listen(port, host, () => {
+  console.log(`Starz Shots Gallery listening on ${host}:${port} (base path '${basePath || "/"}')`);
   sync.start();
 });
 
