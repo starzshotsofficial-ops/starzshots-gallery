@@ -125,6 +125,11 @@ async function routeGallery(request, response, segments, url) {
     return handleOriginal(response, gallery, decodeURIComponent(segments[2] || ""));
   }
 
+  if (request.method === "DELETE" && action === "files") {
+    if (session.role !== "client") return sendJson(response, 403, { error: "Only the client can remove photos." });
+    return handleDeleteImage(response, gallery, decodeURIComponent(segments[2] || ""));
+  }
+
   if (request.method === "GET" && (action === "download-parts" || action === "download-all")) {
     if (!session.permissions?.canDownloadAll) return sendJson(response, 403, { error: "Bulk download is not enabled for this access code." });
     return action === "download-parts" ? handleDownloadParts(response, gallery) : handleDownloadAll(response, gallery, url);
@@ -263,6 +268,20 @@ async function handleOriginal(response, gallery, fileId) {
     ...SECURITY_HEADERS
   });
   return pipeline(upstream, response);
+}
+
+async function handleDeleteImage(response, gallery, fileId) {
+  const located = cache.findImage(gallery.slug, fileId);
+  if (!located) return sendJson(response, 404, { error: "Photo not found in this gallery." });
+
+  try {
+    await drive.trashFile(fileId);
+  } catch (error) {
+    return sendJson(response, 502, { error: `Could not remove the photo from Google Drive: ${error.message}` });
+  }
+
+  await cache.removeImage(gallery.slug, fileId);
+  return sendJson(response, 200, { ok: true });
 }
 
 function buildDownloadParts(slug) {

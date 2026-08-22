@@ -2,12 +2,16 @@ const basePath = resolveBasePath();
 const gallerySlug = new URLSearchParams(window.location.search).get("event") || "";
 const pageSize = 60;
 
+const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 11 4 4 4-4"/><path d="M5 21h14"/></svg>`;
+const TRASH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>`;
+
 const state = {
   meta: null,
   summary: null,
   scene: "all",
   favoritesOnly: false,
   favorites: new Set(),
+  removed: new Set(),
   role: null,
   viewerId: null,
   viewerLabel: null,
@@ -110,6 +114,7 @@ async function handleAccessFormSubmit(event) {
     state.viewerLabel = session.viewerId;
     state.permissions = session.permissions || {};
     state.favorites = new Set(readFavorites());
+    state.removed = new Set();
 
     await openGallery();
   } catch (error) {
@@ -256,6 +261,7 @@ function appendTiles(images) {
   const fragment = document.createDocumentFragment();
 
   images.forEach((image) => {
+    if (state.removed.has(image.id)) return;
     const index = state.images.length;
     state.images.push(image);
     fragment.append(createTile(image, index));
@@ -300,10 +306,26 @@ function createTile(image, index) {
     download.className = "tile-download";
     download.href = image.downloadUrl;
     download.rel = "noopener";
-    download.textContent = "Download";
+    download.title = "Download photo";
+    download.setAttribute("aria-label", "Download photo");
     download.setAttribute("download", image.filename);
+    download.innerHTML = DOWNLOAD_ICON;
     download.addEventListener("click", (event) => event.stopPropagation());
     tile.append(download);
+  }
+
+  if (state.role === "client") {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "tile-remove";
+    remove.title = "Remove photo";
+    remove.setAttribute("aria-label", "Remove photo");
+    remove.innerHTML = TRASH_ICON;
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeImage(image, tile);
+    });
+    tile.append(remove);
   }
 
   return tile;
@@ -350,13 +372,37 @@ function renderLightbox() {
 }
 
 async function moveLightbox(direction) {
-  const nextIndex = state.lightboxIndex + direction;
+  let nextIndex = state.lightboxIndex + direction;
+  while (nextIndex >= 0 && nextIndex < state.images.length && state.removed.has(state.images[nextIndex].id)) {
+    nextIndex += direction;
+  }
 
   if (nextIndex >= state.images.length - 5) await loadNextPage();
   if (nextIndex < 0 || nextIndex >= state.images.length) return;
 
   state.lightboxIndex = nextIndex;
   renderLightbox();
+}
+
+function removeImage(image, tile) {
+  if (state.role !== "client") return;
+  if (!window.confirm("Permanently remove this photo? It is moved to the Google Drive trash and removed from the gallery for everyone.")) return;
+
+  void deleteImage(image, tile);
+}
+
+async function deleteImage(image, tile) {
+  try {
+    const response = await apiFetch(`/files/${encodeURIComponent(image.id)}`, { method: "DELETE" });
+    await response.json().catch(() => ({}));
+  } catch (error) {
+    window.alert(error.message || "Unable to remove the photo.");
+    return;
+  }
+
+  state.removed.add(image.id);
+  tile.remove();
+  if (elements.lightbox.open) elements.lightbox.close();
 }
 
 async function openDownloadDialog() {

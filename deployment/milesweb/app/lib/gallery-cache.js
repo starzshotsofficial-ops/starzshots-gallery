@@ -166,29 +166,6 @@ function createGalleryCache(dataDir) {
     sceneCache.clear();
   }
 
-  async function removeImage(slug, fileId) {
-    const index = readIndex(slug);
-    if (!index) return false;
-
-    for (const scene of index.scenes || []) {
-      const images = readScene(slug, scene.number);
-      const position = images.findIndex((image) => image.id === fileId);
-      if (position === -1) continue;
-
-      images.splice(position, 1);
-      await writeScene(slug, scene.number, images);
-      scene.count = images.length;
-      await fsp.rm(thumbnailPath(slug, scene.dirName, fileId), { force: true });
-      await fsp.rm(previewPath(slug, scene.dirName, fileId), { force: true });
-
-      index.totalImages = (index.scenes || []).reduce((sum, item) => sum + item.count, 0);
-      await writeIndex(slug, index);
-      return true;
-    }
-
-    return false;
-  }
-
   return {
     thumbnailPath,
     previewPath,
@@ -202,8 +179,7 @@ function createGalleryCache(dataDir) {
     page,
     imagesByIds,
     allImages,
-    remove,
-    removeImage
+    remove
   };
 }
 

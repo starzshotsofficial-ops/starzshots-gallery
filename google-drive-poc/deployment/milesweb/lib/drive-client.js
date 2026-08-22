@@ -5,7 +5,8 @@ const crypto = require("crypto");
 
 const API_ORIGIN = "https://www.googleapis.com";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+// Full drive scope is required so a client removal can trash the file, not just read it.
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const FILE_FIELDS = "id,name,mimeType,size,modifiedTime,thumbnailLink";
 
 function createDriveClient({ env, allowInsecureTls, rootFolderId }) {
@@ -80,6 +81,23 @@ function createDriveClient({ env, allowInsecureTls, rootFolderId }) {
   function getFile(fileId) {
     const params = new URLSearchParams({ fields: `${FILE_FIELDS},parents`, supportsAllDrives: "true" });
     return apiJson(`/drive/v3/files/${encodeURIComponent(fileId)}?${params}`);
+  }
+
+  async function trashFile(fileId) {
+    const body = JSON.stringify({ trashed: true });
+    const result = await request(`${API_ORIGIN}/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${await getAccessToken()}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body)
+      },
+      body
+    });
+    if (result.statusCode < 200 || result.statusCode >= 300) {
+      throw new Error(formatApiError(result.statusCode, result.body));
+    }
+    return JSON.parse(result.body || "{}");
   }
 
   async function streamOriginal(fileId) {
@@ -165,7 +183,10 @@ function createDriveClient({ env, allowInsecureTls, rootFolderId }) {
         const location = response.headers.location;
         if (response.statusCode >= 300 && response.statusCode < 400 && location && redirectsLeft > 0) {
           response.resume();
-          stream(new URL(location, url).toString(), headers, redirectsLeft - 1).then(resolve, reject);
+          const nextUrl = new URL(location, url).toString();
+          // Drive redirects downloads to googleusercontent.com, which rejects the Bearer header; only keep it same-host.
+          const nextHeaders = sameHost(url, nextUrl) ? headers : {};
+          stream(nextUrl, nextHeaders, redirectsLeft - 1).then(resolve, reject);
           return;
         }
         resolve(response);
@@ -174,7 +195,7 @@ function createDriveClient({ env, allowInsecureTls, rootFolderId }) {
     });
   }
 
-  return { listFiles, getFile, streamOriginal, streamThumbnail, resolveEventFolderId, resolveRootFolderId };
+  return { listFiles, getFile, trashFile, streamOriginal, streamThumbnail, resolveEventFolderId, resolveRootFolderId };
 }
 
 function readCredentials(env) {
@@ -207,6 +228,14 @@ function normalizeName(value) {
 
 function base64Url(value) {
   return Buffer.from(value).toString("base64url");
+}
+
+function sameHost(urlA, urlB) {
+  try {
+    return new URL(urlA).host === new URL(urlB).host;
+  } catch {
+    return false;
+  }
 }
 
 module.exports = { createDriveClient, normalizeName };

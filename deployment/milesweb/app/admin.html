@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <base href="/">
   <title>Starz Shots Gallery — Admin</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.extra.css" />
 </head>
 <body>
   <main class="admin-page">
@@ -30,10 +30,12 @@
 
       <section class="admin-card">
         <h2>Find SpaceByte folder</h2>
-        <p>Search for your event folder by name (uses the SpaceByte token configured in .env):</p>
+        <p>Search folders in SpaceByte. Leave the search empty to list the root, or paste a folder ID to list its sub-folders.</p>
         <form id="folderBrowserForm" class="admin-form">
-            <label for="folderSearch">Search for folder (e.g., "Ameya")</label>
+          <label for="folderSearch">Search by name (optional)</label>
           <input id="folderSearch" name="folderSearch" type="text" />
+          <label for="folderParentId">Parent folder ID (optional)</label>
+          <input id="folderParentId" name="folderParentId" type="text" />
           <button type="button" id="browseFoldersButton">Browse folders</button>
           <p id="folderBrowserError" class="error"></p>
           <div id="folderBrowserResults"></div>
@@ -42,6 +44,10 @@
 
       <section class="admin-card">
         <h2>Create new event</h2>
+        <p class="muted">
+          Saving an event immediately starts a background job that indexes the SpaceByte folders and caches a
+          low-resolution copy of every photo under <code>data/thumbnails/&lt;event-slug&gt;/&lt;scene&gt;/</code>.
+        </p>
         <form id="createForm" class="admin-form">
           <label for="createEventName">Event name</label>
           <input id="createEventName" name="eventName" type="text" required />
@@ -55,10 +61,13 @@
           <label for="createSlug">Slug (optional, auto-generated from event name)</label>
           <input id="createSlug" name="slug" type="text" />
 
-          <label for="createFolderPath">SpaceByte folder path (e.g., "Events/Wedding" or folder ID)</label>
-          <input id="createFolderPath" name="spacebyteFolderPath" type="text" placeholder="Paste folder path or ID here" required />
+          <label for="createFolderId">SpaceByte folder ID (from the folder browser below)</label>
+          <input id="createFolderId" name="spacebyteRootFolderId" type="text" placeholder="e.g. 10937716" />
 
-          <label for="createSceneFolders">Scene folder names (comma separated)</label>
+          <label for="createFolderName">SpaceByte folder name (used only if no folder ID is given)</label>
+          <input id="createFolderName" name="spacebyteFolderName" type="text" placeholder="Exact event folder name" />
+
+          <label for="createSceneFolders">Scene folder names (comma separated, blank = every sub-folder)</label>
           <input id="createSceneFolders" name="sceneFolderNames" type="text" value="T.Photo, C.Photo" />
 
           <label for="createCoverImage">Cover image URL (optional)</label>
@@ -88,11 +97,13 @@
                 <th>Event name</th>
                 <th>Event date</th>
                 <th>Client name</th>
-                <th>SpaceByte folder</th>
+                <th>SpaceByte folder ID</th>
+                <th>SpaceByte folder name</th>
                 <th>Scene folders</th>
                 <th>Cover image URL</th>
                 <th>Client code</th>
                 <th>Guest code</th>
+                <th>Cache</th>
                 <th></th>
               </tr>
             </thead>

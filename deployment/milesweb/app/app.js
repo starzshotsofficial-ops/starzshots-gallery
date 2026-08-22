@@ -1,25 +1,22 @@
-function appUrl(value) {
-  if (!value || /^(?:https?:|data:|blob:)/i.test(value)) return value;
-  return new URL(String(value).replace(/^\/+/, ""), document.baseURI).toString();
-}
-
-const gallerySlug = new URLSearchParams(window.location.search).get("event") || "nakshathra-half-saree-function";
-const gallerySource = appUrl(`api/galleries/${gallerySlug}`);
-const galleryMetaSource = appUrl(`api/galleries/${gallerySlug}/meta`);
+const basePath = resolveBasePath();
+const gallerySlug = new URLSearchParams(window.location.search).get("event") || "";
+const pageSize = 60;
 
 const state = {
-  gallery: null,
-  galleryMeta: null,
+  meta: null,
+  summary: null,
   scene: "all",
   favoritesOnly: false,
   favorites: new Set(),
   role: null,
-  accessCode: null,
   viewerId: null,
   viewerLabel: null,
   permissions: {},
-  visibleImages: [],
-  visibleLimit: 24,
+  images: [],
+  total: 0,
+  offset: 0,
+  loading: false,
+  exhausted: false,
   lightboxIndex: 0
 };
 
@@ -38,8 +35,9 @@ const elements = {
   clientName: document.querySelector("#clientName"),
   sceneTabs: document.querySelector("#sceneTabs"),
   galleryGrid: document.querySelector("#galleryGrid"),
-  galleryPagination: document.querySelector("#galleryPagination"),
-  loadMore: document.querySelector("#loadMore"),
+  gridSentinel: document.querySelector("#gridSentinel"),
+  gridStatus: document.querySelector("#gridStatus"),
+  syncNotice: document.querySelector("#syncNotice"),
   showAll: document.querySelector("#showAll"),
   showFavorites: document.querySelector("#showFavorites"),
   downloadAll: document.querySelector("#downloadAll"),
@@ -51,133 +49,219 @@ const elements = {
   lightboxScene: document.querySelector("#lightboxScene"),
   lightboxFilename: document.querySelector("#lightboxFilename"),
   lightboxFavorite: document.querySelector("#lightboxFavorite"),
-  lightboxRemove: document.querySelector("#lightboxRemove"),
   lightboxDownload: document.querySelector("#lightboxDownload"),
   closeLightbox: document.querySelector("#closeLightbox"),
   previousImage: document.querySelector("#previousImage"),
-  nextImage: document.querySelector("#nextImage")
+  nextImage: document.querySelector("#nextImage"),
+  downloadDialog: document.querySelector("#downloadDialog"),
+  downloadParts: document.querySelector("#downloadParts"),
+  closeDownloadDialog: document.querySelector("#closeDownloadDialog")
 };
 
-let fullGalleryPromise = null;
+function resolveBasePath() {
+  return window.location.pathname
+    .replace(/\/(index|admin)\.html$/, "")
+    .replace(/\/admin\/?$/, "")
+    .replace(/\/$/, "");
+}
 
-async function loadGallery() {
-  if (window.STARZ_SAMPLE_GALLERY && window.location.protocol === "file:") {
-    state.gallery = window.STARZ_SAMPLE_GALLERY;
-    state.galleryMeta = buildMetaFromGallery(window.STARZ_SAMPLE_GALLERY);
-    renderAccess();
+function apiUrl(suffix) {
+  return `${basePath}/api/galleries/${encodeURIComponent(gallerySlug)}${suffix}`;
+}
+
+async function apiFetch(suffix, options) {
+  const response = await fetch(apiUrl(suffix), options);
+  if (response.ok) return response;
+
+  const payload = await response.json().catch(() => ({}));
+  throw new Error(payload.error || `Request failed with status ${response.status}.`);
+}
+
+async function loadMeta() {
+  const response = await apiFetch("/meta");
+  state.meta = await response.json();
+  elements.accessTitle.textContent = state.meta.eventName;
+  elements.accessMeta.textContent = `${state.meta.clientName} - ${formatDate(state.meta.eventDate)}`;
+  elements.viewerId.focus();
+}
+
+async function handleAccessFormSubmit(event) {
+  event.preventDefault();
+  elements.accessError.textContent = "";
+
+  const viewerId = elements.viewerId.value.trim();
+  const accessCode = elements.accessCode.value.trim();
+
+  if (!viewerId || !accessCode) {
+    elements.accessError.textContent = "Please enter both your name/email and access code.";
     return;
   }
 
   try {
-    const response = await fetch(galleryMetaSource);
-    if (!response.ok) {
-      throw new Error("Gallery data could not be loaded.");
-    }
-    state.galleryMeta = await response.json();
-    prefetchFullGallery();
+    const response = await apiFetch("/access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ viewerId, accessCode })
+    });
+
+    const session = await response.json();
+    state.role = session.role;
+    state.viewerId = session.viewerId;
+    state.viewerLabel = session.viewerId;
+    state.permissions = session.permissions || {};
+    state.favorites = new Set(readFavorites());
+
+    await openGallery();
   } catch (error) {
-    if (!window.STARZ_SAMPLE_GALLERY) {
-      throw error;
-    }
-    state.gallery = window.STARZ_SAMPLE_GALLERY;
-    state.galleryMeta = buildMetaFromGallery(window.STARZ_SAMPLE_GALLERY);
+    elements.accessError.textContent = error.message || "Unable to open the gallery.";
   }
-
-  renderAccess();
 }
 
-function renderAccess() {
-  const meta = state.galleryMeta || state.gallery;
-  if (!meta) return;
+async function openGallery() {
+  state.summary = await (await apiFetch("/summary")).json();
 
-  elements.accessTitle.textContent = meta.eventName;
-  elements.accessMeta.textContent = `${meta.clientName} - ${formatDate(meta.eventDate)}`;
-  elements.viewerId.focus();
-}
-
-function openGallery() {
   elements.accessView.classList.add("hidden");
   elements.galleryView.classList.remove("hidden");
 
-  elements.coverImage.src = appUrl(state.gallery.coverImage);
-  elements.coverImage.alt = `${state.gallery.eventName} cover`;
-  elements.eventName.textContent = state.gallery.eventName;
-  elements.eventDate.textContent = formatDate(state.gallery.eventDate);
-  elements.clientName.textContent = state.gallery.clientName;
+  if (state.summary.coverImage) {
+    elements.coverImage.src = state.summary.coverImage;
+    elements.coverImage.alt = `${state.summary.eventName} cover`;
+  }
+  elements.eventName.textContent = state.summary.eventName;
+  elements.eventDate.textContent = formatDate(state.summary.eventDate);
+  elements.clientName.textContent = state.summary.clientName;
   elements.visitorRole.textContent = `${state.role === "client" ? "Client" : "Guest"}: ${state.viewerLabel}`;
-  applyPermissions();
 
+  applyPermissions();
+  renderSyncNotice();
   renderScenes();
-  renderGrid();
+  await resetGrid();
+  observeSentinel();
 }
 
 function applyPermissions() {
   elements.showFavorites.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.downloadAll.classList.toggle("hidden", !state.permissions.canDownloadAll);
-  elements.downloadFavoritesCsv.classList.toggle("hidden", !canExportCsv());
+  elements.downloadFavoritesCsv.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxFavorite.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
-  elements.lightboxRemove.classList.toggle("hidden", !canManageGallery());
+}
+
+function renderSyncNotice() {
+  const sync = state.summary.sync || {};
+  const stillCaching = sync.status === "listing" || sync.status === "caching" || sync.status === "never-run";
+
+  elements.syncNotice.classList.toggle("hidden", !stillCaching);
+  if (stillCaching) {
+    elements.syncNotice.textContent = `Photos are still being prepared (${sync.cachedThumbnails || 0} of ${sync.totalImages || 0} ready). Everything still opens, just a little slower until this finishes.`;
+  }
 }
 
 function renderScenes() {
-  const sceneNames = ["all", ...state.gallery.scenes.map((scene) => scene.name)];
-  const favoriteCounts = getFavoriteCountsByScene();
-  const totalCounts = getTotalCountsByScene();
+  const scenes = state.summary.scenes || [];
+  const tabs = [{ name: "all", count: state.summary.totalImages || 0 }, ...scenes];
 
   elements.sceneTabs.replaceChildren(
-    ...sceneNames.map((sceneName) => {
+    ...tabs.map((scene) => {
       const button = document.createElement("button");
       const label = document.createElement("span");
       const count = document.createElement("span");
-      const favoritesForScene = sceneName === "all" ? state.favorites.size : favoriteCounts.get(sceneName) || 0;
-      const totalForScene = sceneName === "all"
-        ? state.gallery.scenes.reduce((total, scene) => total + scene.images.length, 0)
-        : totalCounts.get(sceneName) || 0;
 
       button.type = "button";
-      button.className = `tab ${state.scene === sceneName ? "active" : ""}`;
-      label.textContent = sceneName === "all" ? "All Scenes" : sceneName;
-      button.append(label);
-      count.className = `tab-count ${favoritesForScene > 0 ? "has-favorites" : ""}`;
-      count.textContent = `${favoritesForScene} / ${totalForScene}`;
-      count.title = `${favoritesForScene} selected out of ${totalForScene} photos`;
-      button.append(count);
-      button.addEventListener("click", () => {
-        state.scene = sceneName;
+      button.className = `tab ${state.scene === scene.name ? "active" : ""}`;
+      label.textContent = scene.name === "all" ? "All Scenes" : scene.name;
+      count.className = "tab-count";
+      count.textContent = String(scene.count);
+      count.title = `${scene.count} photos`;
+      button.append(label, count);
+
+      button.addEventListener("click", async () => {
+        state.scene = scene.name;
         state.favoritesOnly = false;
         renderScenes();
-        renderGrid();
+        await resetGrid();
       });
+
       return button;
     })
   );
 }
 
-function renderGrid(resetLimit = true) {
-  state.visibleImages = getFilteredImages();
-  if (resetLimit) state.visibleLimit = 24;
-  const displayedImages = state.visibleImages.slice(0, state.visibleLimit);
-  elements.galleryGrid.replaceChildren(
-    ...displayedImages.map((image, index) => createTile(image, index))
-  );
-
+async function resetGrid() {
+  state.images = [];
+  state.offset = 0;
+  state.total = 0;
+  state.exhausted = false;
+  elements.galleryGrid.replaceChildren();
   elements.showAll.classList.toggle("active", !state.favoritesOnly);
   elements.showFavorites.classList.toggle("active", state.favoritesOnly);
-  elements.favoriteCount.textContent = state.favorites.size;
+  elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
+  await loadNextPage();
+}
 
-  if (state.visibleImages.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "No photos in this view yet.";
-    elements.galleryGrid.append(empty);
+async function loadNextPage() {
+  if (state.loading || state.exhausted) return;
+
+  state.loading = true;
+  elements.gridStatus.textContent = "Loading photos…";
+
+  try {
+    const batch = state.favoritesOnly ? await loadFavoritePage() : await loadScenePage();
+    appendTiles(batch);
+    elements.gridStatus.textContent = state.images.length
+      ? `Showing ${state.images.length} of ${state.total} photos`
+      : "No photos in this view yet.";
+  } catch (error) {
+    elements.gridStatus.textContent = error.message || "Photos could not be loaded.";
+    state.exhausted = true;
+  } finally {
+    state.loading = false;
+  }
+}
+
+async function loadScenePage() {
+  const query = new URLSearchParams({ scene: state.scene, offset: String(state.offset), limit: String(pageSize) });
+  const payload = await (await apiFetch(`/images?${query}`)).json();
+
+  state.total = payload.total;
+  state.offset += payload.images.length;
+  if (!payload.images.length || state.offset >= payload.total) state.exhausted = true;
+
+  return payload.images;
+}
+
+async function loadFavoritePage() {
+  const ids = [...state.favorites].slice(state.offset, state.offset + pageSize);
+  state.total = state.favorites.size;
+
+  if (!ids.length) {
+    state.exhausted = true;
+    return [];
   }
 
-  const hasMore = state.visibleImages.length > displayedImages.length;
-  elements.galleryPagination.hidden = !hasMore;
-  if (hasMore) {
-    elements.loadMore.textContent = `Load more photos (${displayedImages.length} of ${state.visibleImages.length})`;
-  }
+  const payload = await (
+    await apiFetch("/images-by-id", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids })
+    })
+  ).json();
+
+  state.offset += ids.length;
+  if (state.offset >= state.favorites.size) state.exhausted = true;
+  return payload.images;
+}
+
+function appendTiles(images) {
+  const fragment = document.createDocumentFragment();
+
+  images.forEach((image) => {
+    const index = state.images.length;
+    state.images.push(image);
+    fragment.append(createTile(image, index));
+  });
+
+  elements.galleryGrid.append(fragment);
 }
 
 function createTile(image, index) {
@@ -185,102 +269,65 @@ function createTile(image, index) {
   tile.className = "photo-tile";
 
   const img = document.createElement("img");
-  img.src = appUrl(image.thumbnailUrl || image.url);
+  img.src = image.thumbnailUrl;
   img.alt = image.filename;
   img.loading = "lazy";
   img.decoding = "async";
   img.addEventListener("click", () => openLightbox(index));
 
-  const favorite = document.createElement("button");
-  favorite.type = "button";
-  favorite.className = `favorite-button ${state.favorites.has(image.id) ? "active" : ""}`;
-  favorite.innerHTML = "&hearts;";
-  favorite.title = "Toggle favorite";
-  favorite.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleFavorite(image.id);
-  });
-
-  const download = document.createElement("a");
-  download.className = "tile-download";
-  download.href = appUrl(image.downloadUrl || image.url);
-  download.target = "_blank";
-  download.rel = "noopener";
-  download.textContent = "Download";
-  download.title = "Download photo";
-  download.addEventListener("click", (event) => event.stopPropagation());
-
   const numberTag = document.createElement("span");
   numberTag.className = "image-number-tag";
   numberTag.textContent = `#${image.sceneIndex}`;
 
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "tile-remove";
-  remove.textContent = "Remove";
-  remove.title = "Remove photo permanently";
-  remove.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    await removeImagePermanently(image);
-  });
+  tile.append(img, numberTag);
 
-  tile.append(img);
-  tile.append(numberTag);
   if (state.permissions.canFavorite) {
+    const favorite = document.createElement("button");
+    favorite.type = "button";
+    favorite.className = `favorite-button ${state.favorites.has(image.id) ? "active" : ""}`;
+    favorite.innerHTML = "&hearts;";
+    favorite.title = "Toggle favorite";
+    favorite.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleFavorite(image.id);
+      favorite.classList.toggle("active", state.favorites.has(image.id));
+    });
     tile.append(favorite);
   }
+
   if (state.permissions.canDownloadSingle) {
+    const download = document.createElement("a");
+    download.className = "tile-download";
+    download.href = image.downloadUrl;
+    download.rel = "noopener";
+    download.textContent = "Download";
+    download.setAttribute("download", image.filename);
+    download.addEventListener("click", (event) => event.stopPropagation());
     tile.append(download);
   }
-  if (canManageGallery()) {
-    tile.append(remove);
-  }
+
   return tile;
 }
 
-function getFilteredImages() {
-  const allImages = state.gallery.scenes.flatMap((scene) =>
-    scene.images.map((image, index) => ({ ...image, scene: scene.name, sceneIndex: index + 1 }))
+function observeSentinel() {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadNextPage();
+    },
+    { rootMargin: "600px 0px" }
   );
-
-  return allImages.filter((image) => {
-    const sceneMatches = state.scene === "all" || image.scene === state.scene;
-    const favoriteMatches = !state.favoritesOnly || state.favorites.has(image.id);
-    return sceneMatches && favoriteMatches;
-  });
+  observer.observe(elements.gridSentinel);
 }
 
 function toggleFavorite(imageId) {
   if (!state.permissions.canFavorite) return;
 
-  if (state.favorites.has(imageId)) {
-    state.favorites.delete(imageId);
-  } else {
-    state.favorites.add(imageId);
-  }
+  if (state.favorites.has(imageId)) state.favorites.delete(imageId);
+  else state.favorites.add(imageId);
 
   writeFavorites([...state.favorites]);
-  renderScenes();
-  renderGrid();
-
-  if (elements.lightbox.open) {
-    renderLightbox();
-  }
-}
-
-function getFavoriteCountsByScene() {
-  return state.gallery.scenes.reduce((counts, scene) => {
-    const count = scene.images.filter((image) => state.favorites.has(image.id)).length;
-    counts.set(scene.name, count);
-    return counts;
-  }, new Map());
-}
-
-function getTotalCountsByScene() {
-  return state.gallery.scenes.reduce((counts, scene) => {
-    counts.set(scene.name, scene.images.length);
-    return counts;
-  }, new Map());
+  elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
+  if (elements.lightbox.open) renderLightbox();
 }
 
 function openLightbox(index) {
@@ -290,28 +337,100 @@ function openLightbox(index) {
 }
 
 function renderLightbox() {
-  const image = state.visibleImages[state.lightboxIndex];
+  const image = state.images[state.lightboxIndex];
   if (!image) return;
 
-  elements.lightboxImage.src = appUrl(image.url);
+  elements.lightboxImage.src = image.url;
   elements.lightboxImage.alt = image.filename;
   elements.lightboxScene.textContent = `${image.scene} #${image.sceneIndex}`;
   elements.lightboxFilename.textContent = image.filename;
   elements.lightboxFavorite.textContent = state.favorites.has(image.id) ? "Remove Favorite" : "Favorite";
-  elements.lightboxDownload.href = appUrl(image.downloadUrl || image.url);
+  elements.lightboxDownload.href = image.downloadUrl;
   elements.lightboxDownload.setAttribute("download", image.filename);
 }
 
-function moveLightbox(direction) {
-  const total = state.visibleImages.length;
-  state.lightboxIndex = (state.lightboxIndex + direction + total) % total;
+async function moveLightbox(direction) {
+  const nextIndex = state.lightboxIndex + direction;
+
+  if (nextIndex >= state.images.length - 5) await loadNextPage();
+  if (nextIndex < 0 || nextIndex >= state.images.length) return;
+
+  state.lightboxIndex = nextIndex;
   renderLightbox();
 }
 
-function readFavorites() {
-  const key = favoriteStorageKey();
+async function openDownloadDialog() {
+  if (!state.permissions.canDownloadAll) return;
+
+  elements.downloadParts.replaceChildren();
+  elements.downloadDialog.showModal();
+
   try {
-    return JSON.parse(localStorage.getItem(key)) || [];
+    const payload = await (await apiFetch("/download-parts")).json();
+
+    if (!payload.parts.length) {
+      elements.downloadParts.textContent = "No photos are available for download yet.";
+      return;
+    }
+
+    elements.downloadParts.replaceChildren(
+      ...payload.parts.map((part) => {
+        const row = document.createElement("div");
+        row.className = "download-part";
+
+        const label = document.createElement("span");
+        label.textContent =
+          payload.parts.length > 1
+            ? `Part ${part.part} — ${part.imageCount} photos (${formatBytes(part.approximateBytes)})`
+            : `${part.imageCount} photos (${formatBytes(part.approximateBytes)})`;
+
+        const link = document.createElement("a");
+        link.className = "download-button";
+        link.href = part.url;
+        link.textContent = "Download";
+
+        row.append(label, link);
+        return row;
+      })
+    );
+  } catch (error) {
+    elements.downloadParts.textContent = error.message || "Download list could not be loaded.";
+  }
+}
+
+async function downloadFavoritesCsv() {
+  if (!state.permissions.canFavorite) return;
+
+  if (!state.favorites.size) {
+    window.alert("No favorites selected.");
+    return;
+  }
+
+  const payload = await (
+    await apiFetch("/images-by-id", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...state.favorites] })
+    })
+  ).json();
+
+  const csv = ["scene,filename"]
+    .concat(payload.images.map((image) => `${JSON.stringify(image.scene)},${JSON.stringify(image.filename)}`))
+    .join("\n");
+
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${gallerySlug}-favorites.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function readFavorites() {
+  try {
+    return JSON.parse(localStorage.getItem(favoriteStorageKey())) || [];
   } catch {
     return [];
   }
@@ -322,297 +441,67 @@ function writeFavorites(favorites) {
 }
 
 function favoriteStorageKey() {
-  return `starz-shots:favorites:${state.gallery.slug}:${state.role}:${state.viewerId}`;
+  return `starz-shots:favorites:${gallerySlug}:${state.role}:${state.viewerId}`;
 }
 
 function formatDate(dateValue) {
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  }).format(new Date(dateValue));
+  if (!dateValue) return "";
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) return String(dateValue);
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "long", year: "numeric" }).format(parsed);
 }
 
-function getRoleForAccessCode(accessCode) {
-  const enteredCode = accessCode.toLowerCase().trim();
-  const meta = state.galleryMeta || state.gallery;
-  const accessCodes = meta?.accessCodes || [
-    {
-      code: meta?.accessCode,
-      role: "client",
-      permissions: {
-        canFavorite: true,
-        canDownloadSingle: true,
-        canDownloadAll: true
-      }
-    }
-  ];
-
-  return accessCodes.find((entry) => entry.code.toLowerCase().trim() === enteredCode);
-}
-
-function normalizeViewerId(value) {
-  return value.trim().toLowerCase().replace(/\s+/g, "");
-}
-
-function buildMetaFromGallery(gallery) {
-  return {
-    eventName: gallery.eventName,
-    eventDate: gallery.eventDate,
-    clientName: gallery.clientName,
-    slug: gallery.slug,
-    accessCodes: gallery.accessCodes || [],
-    coverImage: gallery.coverImage || ""
-  };
-}
-
-function prefetchFullGallery() {
-  if (state.gallery || fullGalleryPromise) return;
-
-  fullGalleryPromise = fetch(gallerySource)
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error("Gallery photos could not be loaded.");
-      }
-      return response.json();
-    })
-    .then((gallery) => {
-      state.gallery = gallery;
-      return gallery;
-    });
-}
-
-async function ensureGalleryLoaded() {
-  if (state.gallery) return;
-
-  prefetchFullGallery();
-  state.gallery = await fullGalleryPromise;
-}
-
-function isValidViewerId(value) {
-  const normalized = normalizeViewerId(value);
-  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
-  const digits = normalized.replace(/\D/g, "");
-  return looksLikeEmail || digits.length >= 8;
-}
-
-function isAllowedClient(access, viewerId) {
-  if (access.role !== "client" || !access.allowedViewers?.length) {
-    return true;
+function formatBytes(bytes) {
+  if (!bytes) return "size unknown";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
   }
-
-  return access.allowedViewers.some((viewer) =>
-    viewer.identifiers.some((identifier) => normalizeViewerId(identifier) === viewerId)
-  );
-}
-
-function getViewerLabel(access, viewerId) {
-  const viewer = access.allowedViewers?.find((entry) =>
-    entry.identifiers.some((identifier) => normalizeViewerId(identifier) === viewerId)
-  );
-
-  return viewer?.name || viewerId;
-}
-
-function downloadFullGallery() {
-  if (!state.permissions.canDownloadAll) return;
-
-  if (state.gallery.apiDownloadAllUrl) {
-    window.location.href = appUrl(state.gallery.apiDownloadAllUrl);
-    return;
-  }
-
-  const imageUrls = state.gallery.scenes.flatMap((scene) =>
-    scene.images.map((image) => image.downloadUrl || image.url)
-  );
-
-  if (!imageUrls.length) {
-    window.alert("No images are available for download.");
-    return;
-  }
-
-  window.alert("Bulk download is not supported for this gallery. Opening the first image instead.");
-  window.open(appUrl(imageUrls[0]), "_blank");
-}
-
-function downloadFavoritesCsv() {
-  if (!canExportCsv()) return;
-
-  const favoriteItems = state.gallery.scenes.flatMap((scene) =>
-    scene.images
-      .filter((image) => state.favorites.has(image.id))
-      .map((image) => String(image.filename || "").trim())
-      .filter(Boolean)
-  );
-
-  if (!favoriteItems.length) {
-    window.alert("No favorites selected.");
-    return;
-  }
-
-  const csv = ["filename"].concat(
-    favoriteItems.map((filename) => JSON.stringify(filename))
-  ).join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${state.gallery.slug}-favorites.csv`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function canManageGallery() {
-  return state.role === "client";
-}
-
-function canExportCsv() {
-  return state.permissions.canFavorite;
-}
-
-async function removeImagePermanently(image) {
-  if (!canManageGallery()) return;
-
-  if (!window.confirm("Are you sure you want to remove this photo?")) {
-    return;
-  }
-
-  try {
-    const response = await fetch(appUrl(`api/files/${encodeURIComponent(image.id)}`), {
-      method: "DELETE"
-    });
-
-    if (!response.ok) {
-      throw new Error("Unable to remove the photo.");
-    }
-
-    state.gallery.scenes = state.gallery.scenes.map((scene) => ({
-      ...scene,
-      images: scene.images.filter((img) => img.id !== image.id)
-    }));
-
-    renderGrid();
-    if (elements.lightbox.open) {
-      elements.lightbox.close();
-    }
-  } catch (error) {
-    window.alert(error.message || "Failed to remove image.");
-  }
-}
-
-function setAccessError(message) {
-  elements.accessError.textContent = message || "";
-}
-
-function getViewerLabelForRole(access, viewerId) {
-  if (!access || !viewerId) return viewerId;
-
-  const viewer = access.allowedViewers?.find((entry) =>
-    entry.identifiers.some((identifier) => normalizeViewerId(String(identifier)) === viewerId)
-  );
-
-  return viewer?.name || viewerId;
-}
-
-async function handleAccessFormSubmit(event) {
-  event.preventDefault();
-  setAccessError("");
-
-  const rawViewerId = elements.viewerId.value;
-  const accessCode = elements.accessCode.value;
-
-  if (!rawViewerId || !accessCode) {
-    setAccessError("Please enter both your name/email and access code.");
-    return;
-  }
-
-  if (!isValidViewerId(rawViewerId)) {
-    setAccessError("Enter a valid name or email address.");
-    return;
-  }
-
-  const access = getRoleForAccessCode(accessCode);
-  if (!access) {
-    setAccessError("Invalid access code.");
-    return;
-  }
-
-  const normalizedViewerId = normalizeViewerId(rawViewerId);
-  if (access.role === "client" && access.allowedViewers?.length) {
-    const allowed = access.allowedViewers.some((viewer) =>
-      viewer.identifiers.some((identifier) => normalizeViewerId(String(identifier)) === normalizedViewerId)
-    );
-
-    if (!allowed) {
-      setAccessError("You are not authorized to access this gallery with that code.");
-      return;
-    }
-  }
-
-  try {
-    await ensureGalleryLoaded();
-    state.role = access.role;
-    state.viewerId = normalizedViewerId;
-    state.viewerLabel = getViewerLabelForRole(access, normalizedViewerId);
-    state.accessCode = accessCode;
-    state.permissions = access.permissions || {
-      canFavorite: true,
-      canDownloadSingle: true,
-      canDownloadAll: false
-    };
-    state.favorites = new Set(readFavorites());
-    openGallery();
-  } catch (error) {
-    setAccessError(error.message || "Unable to load gallery data.");
-  }
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function bindUiEvents() {
   elements.accessForm.addEventListener("submit", handleAccessFormSubmit);
-  elements.loadMore.addEventListener("click", () => {
-    state.visibleLimit += 24;
-    renderGrid(false);
-  });
-  elements.showAll.addEventListener("click", () => {
+
+  elements.showAll.addEventListener("click", async () => {
     state.favoritesOnly = false;
-    renderScenes();
-    renderGrid();
+    await resetGrid();
   });
-  elements.showFavorites.addEventListener("click", () => {
+
+  elements.showFavorites.addEventListener("click", async () => {
     state.favoritesOnly = true;
-    renderScenes();
-    renderGrid();
+    await resetGrid();
   });
-  elements.downloadAll.addEventListener("click", downloadFullGallery);
+
+  elements.downloadAll.addEventListener("click", openDownloadDialog);
   elements.downloadFavoritesCsv.addEventListener("click", downloadFavoritesCsv);
-  elements.closeLightbox.addEventListener("click", () => {
-    if (elements.lightbox.open) elements.lightbox.close();
-  });
+  elements.closeDownloadDialog.addEventListener("click", () => elements.downloadDialog.close());
+
+  elements.closeLightbox.addEventListener("click", () => elements.lightbox.close());
   elements.previousImage.addEventListener("click", () => moveLightbox(-1));
   elements.nextImage.addEventListener("click", () => moveLightbox(1));
   elements.lightboxFavorite.addEventListener("click", () => {
-    const image = state.visibleImages[state.lightboxIndex];
-    if (!image) return;
-    toggleFavorite(image.id);
-  });
-  elements.lightboxRemove.addEventListener("click", async () => {
-    const image = state.visibleImages[state.lightboxIndex];
-    if (!image) return;
-    await removeImagePermanently(image);
+    const image = state.images[state.lightboxIndex];
+    if (image) toggleFavorite(image.id);
   });
 }
 
 async function init() {
   bindUiEvents();
 
+  if (!gallerySlug) {
+    elements.accessMeta.textContent = "No event was selected. Open the link your photographer shared with you.";
+    return;
+  }
+
   try {
-    await loadGallery();
+    await loadMeta();
   } catch (error) {
-    setAccessError(error.message || "Failed to load gallery metadata.");
+    elements.accessMeta.textContent = error.message || "Event details could not be loaded.";
   }
 }
 
-init();
+void init();

@@ -1,1318 +1,538 @@
-﻿const http = require("http");
-const https = require("https");
+"use strict";
+
+const http = require("http");
 const fs = require("fs");
+const fsp = fs.promises;
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { pipeline } = require("stream/promises");
-const sharp = require("sharp");
+
+const { loadEnvFile, readString, readNumber, readBoolean } = require("./lib/env");
+const { createConfigStore, createAccessCodes, getAccessCode, setAccessCode, matchAccessCode, toSlug, sourceSignature } = require("./lib/config-store");
+const { createSpaceByteClient } = require("./lib/spacebyte-client");
+const { createGalleryCache } = require("./lib/gallery-cache");
+const { createSyncWorker } = require("./lib/sync-worker");
+const { createSessionManager, timingSafeEqual } = require("./lib/session");
+const { ZipWriter } = require("./lib/zip-writer");
+const imageProcessor = require("./lib/image-processor");
+const { sendJson, serveStatic, readJsonBody, SECURITY_HEADERS } = require("./lib/http-utils");
 
 const rootDir = __dirname;
-// Merge .env (local dev) with process.env, which takes precedence (Render/host-provided vars)
-const env = { ...loadEnv(path.join(rootDir, ".env")), ...process.env };
-const port = Number(env.PORT || 8080);
-const galleriesConfigPath = path.join(rootDir, "config", "galleries.json");
-const config = readJson(galleriesConfigPath) || { galleries: [] };
-const favoritesStorePath = path.join(rootDir, "data", "favorites-submissions.json");
-const thumbnailCacheDir = path.join(rootDir, "data", "thumbnail-cache");
-const thumbnailJobs = new Map();
-let activeThumbnailJobs = 0;
-const thumbnailQueue = [];
+const env = { ...loadEnvFile(path.join(rootDir, ".env")), ...process.env };
 
-const spacebyteBaseUrl = env.SPACEBYTE_BASE_URL || "https://spacebyte.in/api/v1";
-const spacebyteToken = env.SPACEBYTE_TOKEN || "";
-const spacebyteAuthScheme = String(env.SPACEBYTE_AUTH_SCHEME || "Bearer").trim() || "Bearer";
-const adminToken = env.ADMIN_TOKEN || "";
-const appBasePath = normalizeAppBasePath(env.APP_BASE_PATH || "/");
-const allowInsecureTls = String(env.SPACEBYTE_ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
-const imageExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
-const galleryHydrationCache = new Map();
-const galleryCacheTtlMs = 10 * 60 * 1000;
+// An empty PORT coerces to 0, so only accept a real listening port here.
+const port = readNumber(env, "PORT", 0) || 3001;
+const host = readString(env, "HOST", "0.0.0.0");
+const basePath = normalizeBasePath(readString(env, "APP_BASE_PATH"));
+const dataDir = path.resolve(rootDir, readString(env, "DATA_DIR", "./data"));
+const adminToken = readString(env, "ADMIN_TOKEN");
+const thumbnailSize = readNumber(env, "THUMBNAIL_SIZE", 400);
+const previewSize = readNumber(env, "PREVIEW_SIZE", 1600);
+const zipPartMaxFiles = readNumber(env, "ZIP_PART_MAX_FILES", 400);
+const zipPartMaxBytes = readNumber(env, "ZIP_PART_MAX_BYTES", 1_610_612_736);
+const maxPageSize = 120;
 
-if (allowInsecureTls) {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-}
-
-const contentTypes = {
-  ".css": "text/css; charset=utf-8",
-  ".csv": "text/csv; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".md": "text/markdown; charset=utf-8",
-  ".txt": "text/plain; charset=utf-8",
-  ".svg": "image/svg+xml; charset=utf-8",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".ico": "image/x-icon",
-  ".webp": "image/webp"
-};
-
-// Only these files are intended to be reachable directly from the browser.
-// Keeping this allow-list prevents configuration, submission data, and .env
-// files from ever being exposed by the static-file fallback.
-const publicFiles = new Set([
-  "index.html",
-  "admin.html",
-  "app.js",
-  "admin.js",
-  "styles.css"
-]);
+const config = createConfigStore(path.join(rootDir, "config", "galleries.json"));
+const cache = createGalleryCache(dataDir);
+const client = createSpaceByteClient({
+  baseUrl: readString(env, "SPACEBYTE_BASE_URL", "https://spacebyte.in/api/v1"),
+  token: readString(env, "SPACEBYTE_TOKEN"),
+  authScheme: readString(env, "SPACEBYTE_AUTH_SCHEME", "Bearer"),
+  allowInsecureTls: readBoolean(env, "SPACEBYTE_ALLOW_INSECURE_TLS", false)
+});
+const sync = createSyncWorker({
+  config,
+  cache,
+  client,
+  thumbnailSize,
+  concurrency: readNumber(env, "SYNC_CONCURRENCY", 2),
+  refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360)
+});
+const sessions = createSessionManager({
+  secret: resolveSessionSecret(),
+  ttlHours: readNumber(env, "SESSION_TTL_HOURS", 12),
+  basePath,
+  secureCookies: readBoolean(env, "SECURE_COOKIES", true)
+});
 
 const server = http.createServer(async (request, response) => {
   try {
-    const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
-    url.pathname = stripAppBasePath(url.pathname);
-
-    if (request.method === "GET" && url.pathname === "/healthz") {
-      sendJson(response, 200, { ok: true });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/admin/events") {
-      if (!authorizeAdmin(request, response)) return;
-      const syncWithSpaceByte = url.searchParams.get("sync") === "true";
-
-      if (syncWithSpaceByte) {
-        await reconcileGalleriesWithSpaceByte();
-      }
-
-      sendJson(response, 200, {
-        events: config.galleries.map((gallery) => ({
-          slug: gallery.slug,
-          eventName: gallery.eventName,
-          eventDate: gallery.eventDate,
-          clientName: gallery.clientName,
-          coverImage: gallery.coverImage || "",
-          spacebyteRootFolderId: gallery.spacebyteRootFolderId || "",
-          spacebyteFolderPath: gallery.spacebyteFolderPath || "",
-          spacebyteFolderName: gallery.spacebyteFolderName || "",
-          sceneFolderNames: gallery.sceneFolderNames || [],
-          clientCode: getAccessCode(gallery, "client"),
-          guestCode: getAccessCode(gallery, "guest"),
-          allowedViewers: getAllowedViewerSummary(gallery)
-        }))
-      });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/admin/spacebyte-status") {
-      if (!authorizeAdmin(request, response)) return;
-      await handleSpaceByteStatus(response);
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/admin/events") {
-      if (!authorizeAdmin(request, response)) return;
-      await handleCreateAdminEvent(request, response);
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/admin/browse-spacebyte-folders") {
-      if (!authorizeAdmin(request, response)) return;
-      await handleBrowseSpaceByteFolders(request, response);
-      return;
-    }
-
-    if (request.method === "PUT" && /^\/api\/admin\/events\/[^/]+$/.test(url.pathname)) {
-      if (!authorizeAdmin(request, response)) return;
-      await handleUpdateAdminEvent(url, request, response);
-      return;
-    }
-
-    if (request.method === "GET" && (url.pathname === "/admin" || url.pathname === "/admin/")) {
-      serveStatic("/admin.html", response);
-      return;
-    }
-
-    if (request.method === "POST" && /\/api\/galleries\/[^/]+\/favorites\/finalize$/.test(url.pathname)) {
-      await handleFinalizeFavoritesRequest(request, url, response);
-      return;
-    }
-
-    if (request.method === "GET" && /\/api\/galleries\/[^/]+\/favorites\.csv$/.test(url.pathname)) {
-      await handleFavoritesCsvRequest(url, response);
-      return;
-    }
-
-    if (request.method === "GET" && /\/api\/galleries\/[^/]+\/download-all$/.test(url.pathname)) {
-      await handleDownloadAllRequest(url, response);
-      return;
-    }
-
-    if (request.method === "DELETE" && /^\/api\/files\/[^/]+$/.test(url.pathname)) {
-      await handleDeleteFileRequest(request, url, response);
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/api/galleries/")) {
-      await handleGalleryRequest(url, response);
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/api/files/")) {
-      await handleFileDownload(url, response);
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/api/thumbnails/")) {
-      await handleThumbnail(url, response);
-      return;
-    }
-
-    serveStatic(url.pathname, response);
+    await route(request, response);
   } catch (error) {
-    if (response.headersSent) {
-      response.destroy();
-      return;
-    }
-    sendJson(response, 500, { error: error.message });
+    if (!response.headersSent) sendJson(response, 500, { error: error.message });
+    else response.end();
   }
 });
 
-server.listen(port, "0.0.0.0", () => {
-  ensureFavoritesStore();
-  console.log(`Starz Shots Gallery running at http://localhost:${port}`);
+server.listen(port, host, () => {
+  console.log(`Starz Shots Gallery listening on ${host}:${port} (base path '${basePath || "/"}')`);
+  if (!imageProcessor.isAvailable()) {
+    console.warn("sharp is not installed. Thumbnails will fall back to full-resolution originals until 'npm install' provides it.");
+  }
+  sync.start();
 });
 
-async function handleCreateAdminEvent(request, response) {
+async function route(request, response) {
+  const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+  const pathname = stripBasePath(url.pathname);
+  const segments = pathname.split("/").filter(Boolean);
+
+  if (request.method === "GET" && pathname === "/healthz") {
+    return sendJson(response, 200, { ok: true });
+  }
+
+  if (segments[0] === "api") {
+    if (segments[1] === "admin") return routeAdmin(request, response, segments.slice(2), url);
+    if (segments[1] === "galleries") return routeGallery(request, response, segments.slice(2), url);
+    return sendJson(response, 404, { error: "Not found." });
+  }
+
+  if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed." });
+  if (pathname === "/admin" || pathname === "/admin/") return serveStatic(rootDir, "/admin.html", response);
+  return serveStatic(rootDir, pathname, response);
+}
+
+// ---------------------------------------------------------------------------
+// Viewer-facing gallery API
+// ---------------------------------------------------------------------------
+
+async function routeGallery(request, response, segments, url) {
+  const slug = decodeURIComponent(segments[0] || "");
+  const action = segments[1] || "";
+  const gallery = config.find(slug);
+  if (!gallery) return sendJson(response, 404, { error: "Gallery not found." });
+
+  if (request.method === "GET" && action === "meta") {
+    return sendJson(response, 200, {
+      slug: gallery.slug,
+      eventName: gallery.eventName,
+      eventDate: gallery.eventDate || "",
+      clientName: gallery.clientName || ""
+    });
+  }
+
+  if (request.method === "POST" && action === "access") {
+    return handleAccess(request, response, gallery);
+  }
+
+  const session = sessions.read(request, slug);
+  if (!session) return sendJson(response, 401, { error: "Enter your access code to view this gallery." });
+
+  if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
+  if (request.method === "GET" && action === "images") return handleImages(response, gallery, url);
+  if (request.method === "POST" && action === "images-by-id") return handleImagesById(request, response, gallery);
+  if (request.method === "GET" && action === "thumbs") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "thumb");
+  if (request.method === "GET" && action === "previews") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "preview");
+
+  if (request.method === "GET" && action === "files") {
+    if (!session.permissions?.canDownloadSingle) return sendJson(response, 403, { error: "Downloads are not enabled for this access code." });
+    return handleOriginal(response, gallery, decodeURIComponent(segments[2] || ""));
+  }
+
+  if (request.method === "GET" && (action === "download-parts" || action === "download-all")) {
+    if (!session.permissions?.canDownloadAll) return sendJson(response, 403, { error: "Bulk download is not enabled for this access code." });
+    return action === "download-parts" ? handleDownloadParts(response, gallery) : handleDownloadAll(response, gallery, url);
+  }
+
+  return sendJson(response, 404, { error: "Not found." });
+}
+
+async function handleAccess(request, response, gallery) {
   const body = await readJsonBody(request);
-  const eventName = String(body.eventName || "").trim();
-  const eventDate = String(body.eventDate || "").trim();
-  const clientName = String(body.clientName || "").trim();
-  const slug = toSlug(String(body.slug || eventName || "").trim());
-  const spacebyteRootFolderId = String(body.spacebyteRootFolderId || "").trim();
-  const spacebyteFolderPath = String(body.spacebyteFolderPath || "").trim();
-  const coverImage = String(body.coverImage || "").trim();
-  const clientCode = String(body.clientCode || "").trim();
-  const guestCode = String(body.guestCode || "guest").trim();
-  const allowedViewers = Array.isArray(body.allowedViewers) ? body.allowedViewers : [];
+  const viewerId = String(body.viewerId || "").trim();
+  const access = matchAccessCode(gallery, body.accessCode);
 
-  if (!eventName || !eventDate || !clientName || !slug || !clientCode) {
-    sendJson(response, 400, {
-      error: "eventName, eventDate, clientName, slug, and clientCode are required."
-    });
-    return;
-  }
+  if (!viewerId || !access) return sendJson(response, 401, { error: "Invalid access code." });
 
-  if (!spacebyteRootFolderId && !spacebyteFolderPath) {
-    sendJson(response, 400, {
-      error: "Provide either spacebyteRootFolderId or spacebyteFolderPath."
-    });
-    return;
-  }
+  const permissions = access.permissions || { canFavorite: true, canDownloadSingle: true, canDownloadAll: false };
+  const cookie = sessions.cookieHeader({ slug: gallery.slug, role: access.role, viewerId, permissions });
 
-  if (config.galleries.some((gallery) => String(gallery.slug || "").toLowerCase() === slug.toLowerCase())) {
-    sendJson(response, 409, { error: `Event slug '${slug}' already exists.` });
-    return;
-  }
+  return sendJson(response, 200, { role: access.role, viewerId, label: access.label, permissions }, { "Set-Cookie": cookie });
+}
 
-  const normalizedAllowedViewers = allowedViewers
-    .map((viewer) => ({
-      name: String(viewer.name || "").trim(),
-      identifiers: Array.isArray(viewer.identifiers)
-        ? viewer.identifiers.map((identifier) => String(identifier || "").trim()).filter(Boolean)
-        : []
-    }))
-    .filter((viewer) => viewer.name && viewer.identifiers.length);
+function handleSummary(response, gallery, session) {
+  const index = cache.readIndex(gallery.slug);
+  const state = sync.status(gallery.slug);
+  const scenes = (index?.scenes || []).map((scene) => ({ name: scene.name, count: scene.count }));
+  const firstImage = index?.scenes?.length ? cache.readScene(gallery.slug, index.scenes[0].number)[0] : null;
 
-  const newGallery = {
-    slug,
-    eventName,
-    eventDate,
-    clientName,
-    spacebyteFolderPath,
-    spacebyteRootFolderId,
-    coverImage,
-    accessCodes: [
-      {
-        label: "Client",
-        code: clientCode,
-        role: "client",
-        ...(normalizedAllowedViewers.length ? { allowedViewers: normalizedAllowedViewers } : {}),
-        permissions: {
-          canFavorite: true,
-          canDownloadSingle: true,
-          canDownloadAll: true
-        }
-      },
-      {
-        label: "Guest",
-        code: guestCode,
-        role: "guest",
-        permissions: {
-          canFavorite: true,
-          canDownloadSingle: true,
-          canDownloadAll: false
-        }
-      }
-    ]
-  };
-
-  config.galleries.push(newGallery);
-  writeGalleriesConfig(config);
-
-  sendJson(response, 201, {
-    ok: true,
-    event: {
-      slug: newGallery.slug,
-      eventName: newGallery.eventName,
-      eventDate: newGallery.eventDate,
-      clientName: newGallery.clientName
-    }
+  return sendJson(response, 200, {
+    slug: gallery.slug,
+    eventName: gallery.eventName,
+    eventDate: gallery.eventDate || "",
+    clientName: gallery.clientName || "",
+    role: session.role,
+    viewerId: session.viewerId,
+    permissions: session.permissions,
+    coverImage:
+      String(gallery.coverImage || "").trim() ||
+      (firstImage ? `${basePath}/api/galleries/${encodeURIComponent(gallery.slug)}/previews/${encodeURIComponent(firstImage.id)}` : ""),
+    totalImages: index?.totalImages || 0,
+    scenes,
+    sync: { status: state.status, cachedThumbnails: state.cachedThumbnails || 0, totalImages: state.totalImages || 0 }
   });
 }
 
-async function handleBrowseSpaceByteFolders(request, response) {
+function handleImages(response, gallery, url) {
+  const sceneName = url.searchParams.get("scene") || "all";
+  const offset = Math.max(0, Number(url.searchParams.get("offset") || 0) | 0);
+  const limit = Math.min(maxPageSize, Math.max(1, Number(url.searchParams.get("limit") || 60) | 0));
+  const result = cache.page(gallery.slug, sceneName, offset, limit);
+
+  return sendJson(response, 200, {
+    total: result.total,
+    offset,
+    limit,
+    images: result.images.map((image) => withUrls(gallery.slug, image))
+  });
+}
+
+async function handleImagesById(request, response, gallery) {
   const body = await readJsonBody(request);
-  const searchTerm = String(body.searchTerm || "").trim().toLowerCase();
-  const parentId = String(body.parentId || "").trim();
+  const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 2000) : [];
+  const images = cache.imagesByIds(gallery.slug, ids).map((image) => withUrls(gallery.slug, image));
+  return sendJson(response, 200, { images });
+}
 
-  if (!spacebyteToken) {
-    sendJson(response, 503, { error: "SPACEBYTE_TOKEN is not configured in .env." });
-    return;
-  }
+function withUrls(slug, image) {
+  const base = `${basePath}/api/galleries/${encodeURIComponent(slug)}`;
+  const fileId = encodeURIComponent(image.id);
+  return {
+    id: image.id,
+    filename: image.filename,
+    scene: image.scene,
+    sceneIndex: image.sceneIndex,
+    thumbnailUrl: `${base}/thumbs/${fileId}`,
+    url: `${base}/previews/${fileId}`,
+    downloadUrl: `${base}/files/${fileId}`
+  };
+}
 
-  if (!parentId && !searchTerm) {
-    sendJson(response, 400, { error: "Enter at least part of a folder name. Browsing the full SpaceByte root is disabled because it can time out." });
-    return;
+/** Serves the cached derivative when present; otherwise builds it from SpaceByte and caches it for the next viewer. */
+async function handleDerivative(response, gallery, fileId, kind) {
+  const located = cache.findImage(gallery.slug, fileId);
+  if (!located) return sendJson(response, 404, { error: "Photo not found in this gallery." });
+
+  const size = kind === "thumb" ? thumbnailSize : previewSize;
+  const targetPath =
+    kind === "thumb"
+      ? cache.thumbnailPath(gallery.slug, located.scene.dirName, fileId)
+      : cache.previewPath(gallery.slug, located.scene.dirName, fileId);
+
+  if (fs.existsSync(targetPath)) return sendCachedFile(response, targetPath);
+
+  const source = await client.streamDownload(fileId);
+  if (source.statusCode < 200 || source.statusCode >= 300) {
+    source.resume();
+    return sendJson(response, 502, { error: `SpaceByte returned status ${source.statusCode}.` });
   }
 
   try {
-    // Keyword searches are already filtered by SpaceByte; paging through the
-    // whole account here makes broad searches time out.
-    const entries = parentId
-      ? await spacebyteListAll({ folderId: parentId })
-      : await spacebyteSearchFolders(searchTerm);
-    const folders = entries.filter((entry) => entry.type === "folder");
-    const filtered = searchTerm
-      ? folders.filter((folder) => String(folder.name || "").toLowerCase().includes(searchTerm))
-      : folders.slice(0, 30);
-
-    sendJson(response, 200, {
-      folders: filtered.map((folder) => ({
-        id: String(folder.id || ""),
-        name: String(folder.name || ""),
-        path: String(folder.path || "")
-      }))
-    });
+    await imageProcessor.writeResized(source, targetPath, size);
   } catch (error) {
-    sendJson(response, 400, {
-      error: error.message || "Unable to browse SpaceByte folders."
-    });
+    return sendJson(response, 502, { error: `Could not prepare the photo: ${error.message}` });
   }
+  return sendCachedFile(response, targetPath);
 }
 
-async function handleUpdateAdminEvent(url, request, response) {
-  const parts = url.pathname.split("/").filter(Boolean);
-  const slug = decodeURIComponent(parts[3] || "");
-  const gallery = findGallery(slug);
+function sendCachedFile(response, filePath) {
+  const stats = fs.statSync(filePath);
+  response.writeHead(200, {
+    "Content-Type": "image/jpeg",
+    "Content-Length": stats.size,
+    "Cache-Control": "private, max-age=604800",
+    ETag: `"${stats.size}-${Number(stats.mtimeMs).toString(16)}"`,
+    ...SECURITY_HEADERS
+  });
+  return pipeline(fs.createReadStream(filePath), response);
+}
 
-  if (!gallery) {
-    sendJson(response, 404, { error: "Gallery not found." });
-    return;
+async function handleOriginal(response, gallery, fileId) {
+  const located = cache.findImage(gallery.slug, fileId);
+  if (!located) return sendJson(response, 404, { error: "Photo not found in this gallery." });
+
+  const upstream = await client.streamDownload(fileId);
+  if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+    upstream.resume();
+    return sendJson(response, 502, { error: `SpaceByte download failed with status ${upstream.statusCode}.` });
   }
 
-  const body = await readJsonBody(request);
+  response.writeHead(200, {
+    "Content-Type": upstream.headers["content-type"] || "application/octet-stream",
+    "Cache-Control": "private, max-age=3600",
+    "Content-Disposition": `attachment; filename="${located.image.filename.replace(/["\\]/g, "_")}"`,
+    ...SECURITY_HEADERS
+  });
+  return pipeline(upstream, response);
+}
 
-  if (body.eventName !== undefined) gallery.eventName = String(body.eventName).trim();
-  if (body.eventDate !== undefined) gallery.eventDate = String(body.eventDate).trim();
-  if (body.clientName !== undefined) gallery.clientName = String(body.clientName).trim();
-  if (body.coverImage !== undefined) gallery.coverImage = String(body.coverImage).trim();
-  if (body.spacebyteRootFolderId !== undefined) {
-    gallery.spacebyteRootFolderId = String(body.spacebyteRootFolderId).trim();
-  }
-  if (body.spacebyteFolderPath !== undefined) {
-    gallery.spacebyteFolderPath = String(body.spacebyteFolderPath).trim();
-  }
-  if (body.spacebyteFolderName !== undefined) {
-    gallery.spacebyteFolderName = String(body.spacebyteFolderName).trim();
-  }
-  if (Array.isArray(body.sceneFolderNames)) {
-    const sceneFolderNames = body.sceneFolderNames.map((name) => String(name || "").trim()).filter(Boolean);
-    if (sceneFolderNames.length) {
-      gallery.sceneFolderNames = sceneFolderNames;
+function buildDownloadParts(slug) {
+  const parts = [];
+  let current = { images: [], bytes: 0 };
+
+  for (const image of cache.allImages(slug)) {
+    if (current.images.length >= zipPartMaxFiles || (current.bytes + image.size > zipPartMaxBytes && current.images.length)) {
+      parts.push(current);
+      current = { images: [], bytes: 0 };
     }
+    current.images.push(image);
+    current.bytes += image.size;
   }
 
-  if (body.clientCode !== undefined) {
-    const clientCode = String(body.clientCode).trim();
-    if (!clientCode) {
-      sendJson(response, 400, { error: "clientCode cannot be empty." });
-      return;
-    }
-    setAccessCode(gallery, "client", clientCode);
-  }
+  if (current.images.length) parts.push(current);
+  return parts;
+}
 
-  if (body.guestCode !== undefined) {
-    const guestCode = String(body.guestCode).trim();
-    if (!guestCode) {
-      sendJson(response, 400, { error: "guestCode cannot be empty." });
-      return;
-    }
-    setAccessCode(gallery, "guest", guestCode);
-  }
-
-  writeGalleriesConfig(config);
-  invalidateHydratedGalleryCache(gallery.slug);
-
-  sendJson(response, 200, {
-    ok: true,
-    event: {
-      slug: gallery.slug,
-      eventName: gallery.eventName,
-      eventDate: gallery.eventDate,
-      clientName: gallery.clientName,
-      clientCode: getAccessCode(gallery, "client"),
-      guestCode: getAccessCode(gallery, "guest")
-    }
+function handleDownloadParts(response, gallery) {
+  const parts = buildDownloadParts(gallery.slug);
+  return sendJson(response, 200, {
+    parts: parts.map((part, index) => ({
+      part: index + 1,
+      imageCount: part.images.length,
+      approximateBytes: part.bytes,
+      url: `${basePath}/api/galleries/${encodeURIComponent(gallery.slug)}/download-all?part=${index + 1}`
+    }))
   });
 }
 
-function setAccessCode(gallery, role, code) {
-  gallery.accessCodes = gallery.accessCodes || [];
-  const access = gallery.accessCodes.find((entry) => entry.role === role);
+async function handleDownloadAll(response, gallery, url) {
+  const parts = buildDownloadParts(gallery.slug);
+  const partNumber = Math.max(1, Number(url.searchParams.get("part") || 1) | 0);
+  const part = parts[partNumber - 1];
 
-  if (access) {
-    access.code = code;
-    return;
+  if (!part) return sendJson(response, 404, { error: "No photos are available for that download part." });
+
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "starzshots-"));
+  const suffix = parts.length > 1 ? `-part${partNumber}-of-${parts.length}` : "";
+
+  response.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="${gallery.slug}${suffix}.zip"`,
+    "Cache-Control": "no-store",
+    ...SECURITY_HEADERS
+  });
+
+  const zip = new ZipWriter(response);
+  const usedNames = new Set();
+
+  try {
+    for (const image of part.images) {
+      const stagedPath = path.join(tempDir, "current");
+      const upstream = await client.streamDownload(image.id);
+      if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+        upstream.resume();
+        continue;
+      }
+
+      await pipeline(upstream, fs.createWriteStream(stagedPath));
+      await zip.addLocalFile(uniqueEntryName(usedNames, `${image.scene}/${image.filename}`), stagedPath);
+      await fsp.rm(stagedPath, { force: true });
+    }
+    await zip.finish();
+  } finally {
+    await fsp.rm(tempDir, { recursive: true, force: true });
+    response.end();
+  }
+}
+
+function uniqueEntryName(usedNames, name) {
+  let candidate = name;
+  let counter = 2;
+  while (usedNames.has(candidate)) {
+    const extension = path.extname(name);
+    candidate = `${name.slice(0, name.length - extension.length)} (${counter})${extension}`;
+    counter += 1;
+  }
+  usedNames.add(candidate);
+  return candidate;
+}
+
+// ---------------------------------------------------------------------------
+// Admin API
+// ---------------------------------------------------------------------------
+
+async function routeAdmin(request, response, segments, url) {
+  if (!authorizeAdmin(request, response)) return undefined;
+
+  if (request.method === "GET" && segments[0] === "events" && !segments[1]) {
+    return sendJson(response, 200, { events: config.list().map(toAdminEvent) });
   }
 
-  gallery.accessCodes.push({
-    label: role === "client" ? "Client" : "Guest",
-    code,
-    role,
-    permissions: {
-      canFavorite: true,
-      canDownloadSingle: true,
-      canDownloadAll: role === "client"
+  if (request.method === "POST" && segments[0] === "events" && !segments[1]) {
+    return handleCreateEvent(request, response);
+  }
+
+  if (segments[0] === "events" && segments[1] && segments[2] === "sync") {
+    const slug = decodeURIComponent(segments[1]);
+    if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
+
+    if (request.method === "POST") {
+      const body = await readJsonBody(request).catch(() => ({}));
+      sync.enqueue(slug, { force: Boolean(body.force) });
+      return sendJson(response, 202, { ok: true, sync: sync.status(slug) });
     }
-  });
+    if (request.method === "GET") return sendJson(response, 200, { sync: sync.status(slug) });
+  }
+
+  if (request.method === "PUT" && segments[0] === "events" && segments[1] && !segments[2]) {
+    return handleUpdateEvent(request, response, decodeURIComponent(segments[1]));
+  }
+
+  if (request.method === "POST" && segments[0] === "browse-spacebyte-folders") {
+    return handleBrowseFolders(request, response);
+  }
+
+  if (request.method === "GET" && segments[0] === "spacebyte-status") {
+    return handleSpaceByteStatus(response);
+  }
+
+  return sendJson(response, 404, { error: "Not found." });
 }
 
 function authorizeAdmin(request, response) {
   if (!adminToken) {
-    sendJson(response, 503, { error: "ADMIN_TOKEN is not configured in .env." });
+    sendJson(response, 503, { error: "ADMIN_TOKEN is not configured." });
     return false;
   }
-
-  const provided = getAdminTokenFromRequest(request);
-  if (provided !== adminToken) {
+  const provided = String(request.headers["x-admin-token"] || extractBearer(request)).trim();
+  if (!timingSafeEqual(provided, adminToken)) {
     sendJson(response, 401, { error: "Invalid admin token." });
     return false;
   }
-
   return true;
 }
 
-function getAdminTokenFromRequest(request) {
-  const directHeader = String(request.headers["x-admin-token"] || "").trim();
-  if (directHeader) return directHeader;
+function extractBearer(request) {
+  const header = String(request.headers.authorization || "").trim();
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+}
 
-  const authHeader = String(request.headers.authorization || "").trim();
-  if (authHeader.toLowerCase().startsWith("bearer ")) {
-    return authHeader.slice(7).trim();
+function toAdminEvent(gallery) {
+  const state = sync.status(gallery.slug);
+  return {
+    slug: gallery.slug,
+    eventName: gallery.eventName,
+    eventDate: gallery.eventDate || "",
+    clientName: gallery.clientName || "",
+    spacebyteRootFolderId: gallery.spacebyteRootFolderId || "",
+    spacebyteFolderName: gallery.spacebyteFolderName || "",
+    spacebyteFolderPath: gallery.spacebyteFolderPath || "",
+    sceneFolderNames: gallery.sceneFolderNames || [],
+    coverImage: gallery.coverImage || "",
+    clientCode: getAccessCode(gallery, "client"),
+    guestCode: getAccessCode(gallery, "guest"),
+    sync: { status: state.status, queued: state.queued, cachedThumbnails: state.cachedThumbnails || 0, totalImages: state.totalImages || 0, error: state.error || "" }
+  };
+}
+
+async function handleCreateEvent(request, response) {
+  const body = await readJsonBody(request);
+  const eventName = String(body.eventName || "").trim();
+  const slug = toSlug(String(body.slug || eventName));
+  const clientCode = String(body.clientCode || "").trim();
+  const spacebyteRootFolderId = String(body.spacebyteRootFolderId || "").trim();
+  const spacebyteFolderName = String(body.spacebyteFolderName || "").trim();
+  const spacebyteFolderPath = String(body.spacebyteFolderPath || "").trim();
+
+  if (!eventName || !slug || !clientCode) {
+    return sendJson(response, 400, { error: "eventName, slug, and clientCode are required." });
+  }
+  if (!spacebyteRootFolderId && !spacebyteFolderName && !spacebyteFolderPath) {
+    return sendJson(response, 400, { error: "Provide a SpaceByte folder ID, folder name, or folder path." });
+  }
+  if (config.find(slug)) {
+    return sendJson(response, 409, { error: `Event slug '${slug}' already exists.` });
   }
 
-  return "";
+  const gallery = config.add({
+    slug,
+    eventName,
+    eventDate: String(body.eventDate || "").trim(),
+    clientName: String(body.clientName || "").trim(),
+    spacebyteRootFolderId,
+    spacebyteRootFolderHash: String(body.spacebyteRootFolderHash || "").trim(),
+    spacebyteFolderName,
+    spacebyteFolderPath,
+    sceneFolderNames: Array.isArray(body.sceneFolderNames) ? body.sceneFolderNames.map((name) => String(name).trim()).filter(Boolean) : [],
+    coverImage: String(body.coverImage || "").trim(),
+    accessCodes: createAccessCodes(clientCode, String(body.guestCode || "guest").trim() || "guest")
+  });
+
+  sync.enqueue(slug);
+  return sendJson(response, 201, { ok: true, event: toAdminEvent(gallery) });
 }
 
-function writeGalleriesConfig(payload) {
-  fs.writeFileSync(galleriesConfigPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-}
+async function handleUpdateEvent(request, response, slug) {
+  const gallery = config.find(slug);
+  if (!gallery) return sendJson(response, 404, { error: "Gallery not found." });
 
-function toSlug(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+  const body = await readJsonBody(request);
+  const before = sourceSignature(gallery);
 
-function normalizeViewerId(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function getAccessCode(gallery, role) {
-  const access = (gallery.accessCodes || []).find((entry) => entry.role === role);
-  return access?.code || "";
-}
-
-function getAllowedViewerSummary(gallery) {
-  const clientAccess = (gallery.accessCodes || []).find((entry) => entry.role === "client");
-  if (!clientAccess?.allowedViewers?.length) {
-    return "";
+  for (const field of ["eventName", "eventDate", "clientName", "spacebyteRootFolderId", "spacebyteRootFolderHash", "spacebyteFolderName", "spacebyteFolderPath", "coverImage"]) {
+    if (body[field] !== undefined) gallery[field] = String(body[field] || "").trim();
   }
+  if (Array.isArray(body.sceneFolderNames)) {
+    gallery.sceneFolderNames = body.sceneFolderNames.map((name) => String(name).trim()).filter(Boolean);
+  }
+  if (body.clientCode !== undefined) setAccessCode(gallery, "client", String(body.clientCode).trim());
+  if (body.guestCode !== undefined) setAccessCode(gallery, "guest", String(body.guestCode).trim());
 
-  return clientAccess.allowedViewers
-    .map((viewer) => {
-      const ids = Array.isArray(viewer.identifiers) ? viewer.identifiers.join(", ") : "";
-      return `${viewer.name || "Viewer"}: ${ids}`;
-    })
-    .join(" | ");
+  config.save();
+  if (sourceSignature(gallery) !== before) sync.enqueue(slug);
+
+  return sendJson(response, 200, { ok: true, event: toAdminEvent(gallery) });
 }
 
-async function reconcileGalleriesWithSpaceByte() {
-  if (!spacebyteToken) return;
-
-  const activeGalleries = [];
-
-  for (const gallery of config.galleries) {
-    const exists = await checkGalleryExistsInSpaceByte(gallery);
-    if (exists) {
-      activeGalleries.push(gallery);
-    }
-  }
-
-  if (activeGalleries.length !== config.galleries.length) {
-    config.galleries.splice(0, config.galleries.length, ...activeGalleries);
-    writeGalleriesConfig(config);
-  }
-}
-
-async function checkGalleryExistsInSpaceByte(gallery) {
-  const params = new URLSearchParams();
-
-  if (gallery.spacebyteRootFolderId) {
-    params.set("folderId", gallery.spacebyteRootFolderId);
-    params.set("parentId", gallery.spacebyteRootFolderId);
-  }
-
-  if (gallery.spacebyteFolderPath) {
-    params.set("path", gallery.spacebyteFolderPath);
-  }
-
-  const url = `${spacebyteBaseUrl}/drive/file-entries${params.toString() ? `?${params}` : ""}`;
+async function handleBrowseFolders(request, response) {
+  const body = await readJsonBody(request);
+  const searchTerm = String(body.searchTerm || "").trim().toLowerCase();
+  const parentId = String(body.parentId || "").trim();
 
   try {
-    await spacebyteJson(url);
-    return true;
-  } catch {
-    return false;
+    const folders = await client.listFolders(parentId);
+    const filtered = searchTerm ? folders.filter((folder) => String(folder.name || "").toLowerCase().includes(searchTerm)) : folders.slice(0, 100);
+    return sendJson(response, 200, {
+      folders: filtered.map((folder) => ({ id: String(folder.id || ""), name: String(folder.name || ""), path: String(folder.path || "") }))
+    });
+  } catch (error) {
+    return sendJson(response, 400, { error: error.message || "Unable to browse SpaceByte folders." });
   }
 }
 
 async function handleSpaceByteStatus(response) {
-  const diagnostics = {
-    configured: {
-      baseUrl: spacebyteBaseUrl,
-      authScheme: spacebyteAuthScheme,
-      tokenPresent: Boolean(spacebyteToken),
-      allowInsecureTls
-    },
-    timestamp: new Date().toISOString(),
-    checks: []
-  };
-
-  if (!spacebyteToken) {
-    sendJson(response, 503, {
-      ...diagnostics,
-      ok: false,
-      error: "SPACEBYTE_TOKEN is not configured."
-    });
-    return;
-  }
-
-  diagnostics.checks.push(await runSpaceByteCheck("api", `${spacebyteBaseUrl}/drive/file-entries?page=1`));
-
-  for (const gallery of config.galleries || []) {
-    if (!hasSpaceByteSource(gallery)) {
-      diagnostics.checks.push({
-        type: "gallery",
-        slug: gallery.slug,
-        ok: false,
-        skipped: true,
-        reason: "No SpaceByte folder source configured"
-      });
-      continue;
-    }
-
-    const check = await runSpaceByteGalleryCheck(gallery);
-    diagnostics.checks.push(check);
-  }
-
-  const ok = diagnostics.checks.every((check) => check.ok || check.skipped);
-  sendJson(response, ok ? 200 : 502, { ...diagnostics, ok });
-}
-
-async function runSpaceByteGalleryCheck(gallery) {
-  const params = new URLSearchParams();
-  if (gallery.spacebyteRootFolderId) {
-    params.set("folderId", String(gallery.spacebyteRootFolderId));
-    params.set("parentId", String(gallery.spacebyteRootFolderId));
-  }
-  if (gallery.spacebyteFolderPath) {
-    params.set("path", String(gallery.spacebyteFolderPath));
-  }
-
-  const url = `${spacebyteBaseUrl}/drive/file-entries${params.toString() ? `?${params}` : ""}`;
-  const result = await runSpaceByteCheck("gallery", url);
-  return {
-    ...result,
-    slug: gallery.slug,
-    eventName: gallery.eventName,
-    rootFolderId: String(gallery.spacebyteRootFolderId || ""),
-    folderPath: String(gallery.spacebyteFolderPath || ""),
-    folderName: String(gallery.spacebyteFolderName || "")
-  };
-}
-
-async function runSpaceByteCheck(type, url) {
-  try {
-    const payload = await spacebyteJson(url);
-    const count = Array.isArray(payload?.data) ? payload.data.length : null;
-    return {
-      type,
-      ok: true,
-      count,
-      request: sanitizeSpaceByteUrl(url)
-    };
-  } catch (error) {
-    return {
-      type,
-      ok: false,
-      error: String(error?.message || "Unknown SpaceByte error"),
-      request: sanitizeSpaceByteUrl(url)
-    };
-  }
-}
-
-function sanitizeSpaceByteUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url;
-  }
-}
-
-async function handleFinalizeFavoritesRequest(request, url, response) {
-  const parts = url.pathname.split("/").filter(Boolean);
-  const slug = decodeURIComponent(parts[2] || "");
-  const gallery = findGallery(slug);
-
-  if (!gallery) {
-    sendJson(response, 404, { error: "Gallery not found." });
-    return;
-  }
-
-  const body = await readJsonBody(request);
-  const viewerId = normalizeViewerId(body.viewerId || "");
-  const accessCode = String(body.accessCode || "").trim();
-  const access = resolveAccess(gallery, viewerId, accessCode);
-
-  if (!access || access.role !== "guest") {
-    sendJson(response, 403, { error: "Only guests can finalize favorites from this action." });
-    return;
-  }
-
-  const favorites = Array.isArray(body.favorites) ? body.favorites : [];
-  if (!favorites.length) {
-    sendJson(response, 400, { error: "No favorites selected." });
-    return;
-  }
-
-  const store = readFavoritesStore();
-  const submissionId = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  store.submissions.push({
-    submissionId,
-    slug,
-    eventName: gallery.eventName,
-    viewerId,
-    viewerLabel: String(body.viewerLabel || viewerId),
-    role: access.role,
-    submittedAt: new Date().toISOString(),
-    favorites: favorites.map((favorite) => ({
-      scene: favorite.scene || "",
-      sceneIndex: Number(favorite.sceneIndex) || 0,
-      filename: String(favorite.filename || ""),
-      spacebyteEntryId: String(favorite.spacebyteEntryId || ""),
-      spacebyteHash: String(favorite.spacebyteHash || "")
-    }))
-  });
-
-  fs.writeFileSync(favoritesStorePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
-
-  sendJson(response, 201, {
-    ok: true,
-    submissionId,
-    slug,
-    favorites: store.submissions[store.submissions.length - 1].favorites.length
-  });
-}
-
-async function handleFavoritesCsvRequest(url, response) {
-  const parts = url.pathname.split("/").filter(Boolean);
-  const slug = decodeURIComponent(parts[2] || "");
-  const gallery = findGallery(slug);
-
-  if (!gallery) {
-    sendJson(response, 404, { error: "Gallery not found." });
-    return;
-  }
-
-  const store = readFavoritesStore();
-  const submissions = store.submissions.filter((entry) => entry.slug === slug);
-  const rows = [];
-
-  submissions.forEach((submission) => {
-    submission.favorites.forEach((favorite) => {
-      rows.push({
-        submissionId: submission.submissionId,
-        submittedAt: submission.submittedAt,
-        viewerId: submission.viewerId,
-        viewerLabel: submission.viewerLabel,
-        role: submission.role,
-        scene: favorite.scene,
-        sceneIndex: favorite.sceneIndex,
-        filename: favorite.filename,
-        spacebyteEntryId: favorite.spacebyteEntryId,
-        spacebyteHash: favorite.spacebyteHash
-      });
-    });
-  });
-
-  const header = [
-    "submissionId",
-    "submittedAt",
-    "viewerId",
-    "viewerLabel",
-    "role",
-    "scene",
-    "sceneIndex",
-    "filename",
-    "spacebyteEntryId",
-    "spacebyteHash"
-  ];
-
-  const csv = [header.join(",")].concat(
-    rows.map((row) =>
-      header.map((key) => JSON.stringify(row[key] || "")).join(",")
-    )
-  ).join("\n");
-
-  response.writeHead(200, {
-    "Content-Type": "text/csv; charset=utf-8",
-    "Content-Disposition": `attachment; filename="${slug}-favorites.csv"`
-  });
-  response.end(csv);
-}
-
-async function handleDeleteFileRequest(request, url, response) {
-  sendJson(response, 501, { error: "File deletion is not implemented." });
-}
-
-async function handleGalleryRequest(url, response) {
-  const parts = url.pathname.split("/").filter(Boolean);
-  const slug = decodeURIComponent(parts[2] || "");
-  let gallery = findGallery(slug);
-
-  if (!gallery) {
-    sendJson(response, 404, { error: "Gallery not found." });
-    return;
-  }
-
-  if (url.pathname.endsWith("/meta")) {
-    sendJson(response, 200, buildMetaFromGallery(gallery));
-    return;
-  }
-
-  if (spacebyteToken && hasSpaceByteSource(gallery)) {
-    const cached = getCachedHydratedGallery(slug);
-    if (cached) {
-      gallery = cached;
-    } else {
-      try {
-        gallery = await hydrateGalleryFromSpaceByte(gallery);
-        setCachedHydratedGallery(slug, gallery);
-      } catch (error) {
-        console.error(`SpaceByte hydration failed for '${slug}': ${error.message}`);
-      }
-    }
-  }
-
-  sendJson(response, 200, gallery);
-}
-
-async function handleFileDownload(url, response) {
-  if (!spacebyteToken) {
-    sendJson(response, 503, { error: "SPACEBYTE_TOKEN is not configured." });
-    return;
-  }
-
-  const parts = url.pathname.split("/").filter(Boolean);
-  const hash = decodeURIComponent(parts[2] || "").trim();
-  if (!hash) {
-    sendJson(response, 400, { error: "Missing file hash." });
-    return;
-  }
-
-  await proxySpaceByteDownload(
-    `${spacebyteBaseUrl}/file-entries/download/${encodeURIComponent(hash)}`,
-    response,
-    "inline",
-    mimeTypeFromFilename(url.searchParams.get("name"))
-  );
-}
-
-async function handleThumbnail(url, response) {
-  if (!spacebyteToken) return sendJson(response, 503, { error: "SPACEBYTE_TOKEN is not configured." });
-  const hash = decodeURIComponent(url.pathname.split("/").filter(Boolean)[2] || "").trim();
-  if (!hash) return sendJson(response, 400, { error: "Missing file hash." });
-  const cacheFile = path.join(thumbnailCacheDir, `${crypto.createHash("sha256").update(hash).digest("hex")}.webp`);
-  try {
-    if (!fs.existsSync(cacheFile)) await getOrCreateThumbnail(hash, cacheFile);
-    const stat = fs.statSync(cacheFile);
-    response.writeHead(200, { "Content-Type": "image/webp", "Content-Length": stat.size, "Cache-Control": "public, max-age=31536000, immutable" });
-    fs.createReadStream(cacheFile).pipe(response);
-  } catch (error) {
-    sendJson(response, 502, { error: `Thumbnail generation failed: ${error.message}` });
-  }
-}
-
-function getOrCreateThumbnail(hash, cacheFile) {
-  if (!thumbnailJobs.has(cacheFile)) {
-    thumbnailJobs.set(cacheFile, scheduleThumbnail(async () => {
-      fs.mkdirSync(thumbnailCacheDir, { recursive: true });
-      if (fs.existsSync(cacheFile)) return;
-      const source = await httpsGetBuffer(`${spacebyteBaseUrl}/file-entries/download/${encodeURIComponent(hash)}`, { Authorization: `${spacebyteAuthScheme} ${spacebyteToken}` }, 90000);
-      if (source.statusCode < 200 || source.statusCode >= 300) throw new Error(`SpaceByte returned ${source.statusCode}`);
-      const thumbnail = await sharp(source.body).rotate().resize({ width: 1000, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
-      fs.writeFileSync(cacheFile, thumbnail);
-    }).finally(() => thumbnailJobs.delete(cacheFile)));
-  }
-  return thumbnailJobs.get(cacheFile);
-}
-
-function scheduleThumbnail(task) {
-  return new Promise((resolve, reject) => { thumbnailQueue.push({ task, resolve, reject }); drainThumbnailQueue(); });
-}
-
-function drainThumbnailQueue() {
-  while (activeThumbnailJobs < 3 && thumbnailQueue.length) {
-    const next = thumbnailQueue.shift(); activeThumbnailJobs += 1;
-    Promise.resolve().then(next.task).then(next.resolve, next.reject).finally(() => { activeThumbnailJobs -= 1; drainThumbnailQueue(); });
-  }
-}
-
-async function handleDownloadAllRequest(url, response) {
-  const parts = url.pathname.split("/").filter(Boolean);
-  const slug = decodeURIComponent(parts[2] || "");
-  const gallery = findGallery(slug);
-
-  if (!gallery) {
-    sendJson(response, 404, { error: "Gallery not found." });
-    return;
-  }
-
-  if (!spacebyteToken) {
-    sendJson(response, 503, { error: "SPACEBYTE_TOKEN is not configured." });
-    return;
-  }
-
-  const folderHash = String(gallery.spacebyteRootFolderHash || "").trim();
-  if (!folderHash) {
-    sendJson(response, 400, { error: "spacebyteRootFolderHash is missing for this gallery." });
-    return;
-  }
-
-  await proxySpaceByteDownload(
-    `${spacebyteBaseUrl}/file-entries/download/${encodeURIComponent(folderHash)}`,
-    response,
-    `attachment; filename="${slug}.zip"`
-  );
-}
-
-async function proxySpaceByteDownload(sourceUrl, response, defaultDisposition, contentTypeOverride = "") {
-  let upstream;
-  try {
-    upstream = await httpsGetStream(sourceUrl, {
-      Authorization: `${spacebyteAuthScheme} ${spacebyteToken}`
-    });
-  } catch (error) {
-    sendJson(response, 502, { error: `SpaceByte download failed: ${error.message}` });
-    return;
-  }
-
-  if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
-    upstream.resume();
-    sendJson(response, upstream.statusCode || 502, { error: `SpaceByte download failed with status ${upstream.statusCode}.` });
-    return;
-  }
-
-  const headers = {
-    "Content-Type": contentTypeOverride || upstream.headers["content-type"] || "application/octet-stream",
-    "Content-Disposition": defaultDisposition
-  };
-  if (defaultDisposition === "inline") {
-    headers["Cache-Control"] = "public, max-age=31536000, immutable";
-  }
-  const contentLength = upstream.headers["content-length"];
-  if (contentLength) {
-    headers["Content-Length"] = contentLength;
-  }
-
-  response.writeHead(200, headers);
-
-  try {
-    await pipeline(upstream, response);
-  } catch (error) {
-    if (error?.code !== "ERR_STREAM_PREMATURE_CLOSE") {
-      console.error("Download stream failed:", error.message);
-    }
-  }
-}
-
-function mimeTypeFromFilename(filename) {
-  const extension = path.extname(String(filename || "")).toLowerCase();
-  return contentTypes[extension] || "";
-}
-
-function resolveAccess(gallery, viewerId, accessCode) {
-  const normalizedViewerId = normalizeViewerId(String(viewerId || ""));
-  const normalizedCode = String(accessCode || "").trim().toLowerCase();
-  const access = (gallery.accessCodes || []).find((entry) =>
-    String(entry.code || "").trim().toLowerCase() === normalizedCode
-  );
-
-  if (!access) {
-    return null;
-  }
-
-  if (access.role === "client" && access.allowedViewers?.length) {
-    const allowed = access.allowedViewers.some((viewer) =>
-      Array.isArray(viewer.identifiers) &&
-      viewer.identifiers.some((identifier) => normalizeViewerId(String(identifier)) === normalizedViewerId)
-    );
-
-    if (!allowed) {
-      return null;
-    }
-  }
-
-  return access;
-}
-
-function findGallery(slug) {
-  if (!slug) return null;
-  return (config.galleries || []).find(
-    (gallery) => String(gallery.slug || "").toLowerCase() === String(slug || "").toLowerCase()
-  );
-}
-
-function hasSpaceByteSource(gallery) {
-  return Boolean(
-    String(gallery.spacebyteRootFolderId || "").trim() ||
-    String(gallery.spacebyteFolderPath || "").trim() ||
-    String(gallery.spacebyteFolderName || "").trim()
-  );
-}
-
-function getCachedHydratedGallery(slug) {
-  const cached = galleryHydrationCache.get(slug);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.data;
-  }
-  return null;
-}
-
-function setCachedHydratedGallery(slug, data) {
-  galleryHydrationCache.set(slug, { data, expiresAt: Date.now() + galleryCacheTtlMs });
-}
-
-function invalidateHydratedGalleryCache(slug) {
-  galleryHydrationCache.delete(slug);
-}
-
-async function hydrateGalleryFromSpaceByte(gallery) {
-  const eventFolder = await resolveEventFolder(gallery);
-  if (!eventFolder) {
-    throw new Error(`SpaceByte event folder was not found for '${gallery.eventName}'.`);
-  }
-
-  const configuredSceneNames = Array.isArray(gallery.sceneFolderNames) && gallery.sceneFolderNames.length
-    ? gallery.sceneFolderNames
-    : ["T.Photo", "C.Photo"];
-
-  const childEntries = await spacebyteListAll({ folderId: eventFolder.id });
-  const folderByName = new Map(
-    childEntries
-      .filter((entry) => entry.type === "folder")
-      .map((entry) => [String(entry.name || "").toLowerCase(), entry])
-  );
-
-  const scenes = (
-    await Promise.all(
-      configuredSceneNames.map(async (sceneName) => {
-        const sceneFolder = folderByName.get(String(sceneName || "").toLowerCase());
-        if (!sceneFolder) return null;
-
-        const sceneEntries = await spacebyteListAll({ folderId: sceneFolder.id });
-        const images = sceneEntries
-          .filter((entry) => entry.type === "image" || imageExtensions.has(String(entry.extension || "").toLowerCase()))
-          .sort((a, b) => compareFilenamesNatural(a.name, b.name))
-          .map((entry) => toGalleryImage(sceneName, entry));
-
-        return {
-          name: sceneName,
-          spacebytePath: sceneFolder.path || "",
-          images
-        };
-      })
-    )
-  ).filter(Boolean);
-
-  const fallbackCover = scenes[0]?.images[0]?.thumbnailUrl || scenes[0]?.images[0]?.url || "";
-
-  return {
-    ...gallery,
-    spacebyteRootFolderId: String(eventFolder.id),
-    spacebyteRootFolderHash: String(eventFolder.hash || gallery.spacebyteRootFolderHash || ""),
-    coverImage: String(gallery.coverImage || "").trim() || fallbackCover,
-    apiDownloadAllUrl: `/api/galleries/${encodeURIComponent(gallery.slug)}/download-all`,
-    scenes
-  };
-}
-
-function compareFilenamesNatural(a, b) {
-  return String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
-}
-
-function toGalleryImage(sceneName, entry) {
-  const hash = String(entry.hash || "");
-  const filename = String(entry.name || entry.file_name || `image-${entry.id}.jpg`);
-  const id = `${toSlug(sceneName)}-${entry.id}`;
-  const fileUrl = `/api/files/${encodeURIComponent(hash)}?name=${encodeURIComponent(filename)}`;
-
-  return {
-    id,
-    filename,
-    spacebyteEntryId: String(entry.id || ""),
-    spacebyteHash: hash,
-    url: fileUrl,
-    // Streaming is reliable on a low-memory shared host; re-encoding large
-    // SpaceByte photos as thumbnails can otherwise time out.
-    thumbnailUrl: fileUrl,
-    downloadUrl: fileUrl
-  };
-}
-
-async function resolveEventFolder(gallery) {
-  const rootId = String(gallery.spacebyteRootFolderId || "").trim();
-  if (rootId) {
-    // Folder id/hash are already known from config, so query its children directly
-    // instead of listing the parent/root (which the API forbids without a folderId filter).
-    return {
-      id: rootId,
-      hash: String(gallery.spacebyteRootFolderHash || ""),
-      path: ""
-    };
-  }
-
-  const folderName = String(gallery.spacebyteFolderName || gallery.eventName || "").trim().toLowerCase();
-  if (folderName) {
-    const rootEntries = await spacebyteListAll({});
-    const match = rootEntries.find((entry) =>
-      entry.type === "folder" && String(entry.name || "").trim().toLowerCase() === folderName
-    );
-    if (match) return match;
-  }
-
-  const folderPath = String(gallery.spacebyteFolderPath || "").trim();
-  if (folderPath) {
-    const entries = await spacebyteListAll({ path: folderPath });
-    const match = entries.find((entry) => entry.type === "folder");
-    if (match) return match;
-  }
-
-  return null;
-}
-
-async function spacebyteListAll(filters) {
-  const items = [];
-  const seenIds = new Set();
-  let page = 1;
-
-  // Follow next_page exactly. Speculative parallel pages can duplicate the
-  // terminal page and overload the SpaceByte API.
-  while (page && page <= 500) {
-    const payload = await spacebyteFetchPage(filters, page);
-    for (const item of Array.isArray(payload.data) ? payload.data : []) {
-      const key = String(item.id || item.hash || "");
-      if (!key || seenIds.has(key)) continue;
-      seenIds.add(key);
-      items.push(item);
-    }
-    const nextPage = Number(payload.next_page);
-    page = Number.isFinite(nextPage) && nextPage > page ? nextPage : null;
-  }
-  return items;
-}
-
-async function spacebyteSearchFolders(searchTerm) {
-  const entries = [];
-  let page = 1;
-  for (let fetched = 0; page && fetched < 3 && entries.length < 30; fetched += 1) {
-    const payload = await spacebyteFetchPage({ query: searchTerm }, page);
-    entries.push(...(Array.isArray(payload.data) ? payload.data : []));
-    const nextPage = Number(payload.next_page);
-    page = Number.isFinite(nextPage) && nextPage > page ? nextPage : null;
-  }
-  return entries;
-}
-
-async function spacebyteFetchPage(filters, page) {
-  const params = new URLSearchParams();
-  params.set("page", String(page));
-
-  if (filters?.folderId) {
-    params.set("folderId", String(filters.folderId));
-    params.set("parentId", String(filters.parentId || filters.folderId));
-  }
-  if (!filters?.folderId && filters?.parentId) {
-    params.set("parentId", String(filters.parentId));
-  }
-  if (filters?.path) {
-    params.set("path", String(filters.path));
-  }
-  if (filters?.query) {
-    params.set("query", String(filters.query));
-  }
-
-  return spacebyteJson(`${spacebyteBaseUrl}/drive/file-entries?${params.toString()}`);
-}
-
-function buildMetaFromGallery(gallery) {
-  return {
-    eventName: gallery.eventName,
-    eventDate: gallery.eventDate,
-    clientName: gallery.clientName,
-    slug: gallery.slug,
-    accessCodes: gallery.accessCodes || [],
-    coverImage: gallery.coverImage || ""
-  };
-}
-
-function ensureFavoritesStore() {
-  fs.mkdirSync(path.dirname(favoritesStorePath), { recursive: true });
-  if (!fs.existsSync(favoritesStorePath)) {
-    fs.writeFileSync(favoritesStorePath, JSON.stringify({ submissions: [] }, null, 2) + "\n", "utf8");
-  }
-}
-
-function readFavoritesStore() {
-  return readJson(favoritesStorePath) || { submissions: [] };
-}
-
-function readJson(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (error) {
-    console.error(`Failed to read JSON from ${filePath}:`, error.message);
-    return null;
-  }
-}
-
-function readJsonBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    request.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-    request.on("end", () => {
-      if (!body) return resolve({});
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    request.on("error", reject);
-  });
-}
-
-function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(payload));
-}
-
-function serveStatic(urlPath, response) {
-  let normalized;
-  try {
-    normalized = decodeURIComponent(urlPath.split("?")[0] || "/");
-  } catch {
-    sendJson(response, 400, { error: "Invalid path." });
-    return;
-  }
-
-  const publicName = normalized === "/" ? "index.html" : normalized.replace(/^\/+/, "");
-  if (!publicFiles.has(publicName)) {
-    sendJson(response, 404, { error: "Not found." });
-    return;
-  }
-
-  const filePath = path.resolve(rootDir, publicName);
-  const relativePath = path.relative(rootDir, filePath);
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-    sendJson(response, 400, { error: "Invalid path." });
-    return;
-  }
-
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    sendJson(response, 404, { error: "Not found." });
-    return;
-  }
-
-  const ext = path.extname(filePath).toLowerCase();
-  const contentType = contentTypes[ext] || "application/octet-stream";
-  response.writeHead(200, { "Content-Type": contentType });
-  const content = fs.readFileSync(filePath);
-  if (ext === ".html") {
-    response.end(content.toString("utf8").replace('<base href="/">', `<base href="${appBasePath}">`));
-    return;
-  }
-  response.end(content);
-}
-
-function normalizeAppBasePath(value) {
-  const cleaned = String(value || "").trim().replace(/^\/+|\/+$/g, "");
-  return cleaned ? `/${cleaned}/` : "/";
-}
-
-function stripAppBasePath(pathname) {
-  if (appBasePath === "/") return pathname;
-  const mountPath = appBasePath.slice(0, -1);
-  if (pathname === mountPath) return "/";
-  if (pathname.startsWith(`${mountPath}/`)) return pathname.slice(mountPath.length) || "/";
-  return pathname;
-}
-
-function loadEnv(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) return {};
-    const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-    const result = {};
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq < 0) continue;
-      const key = trimmed.slice(0, eq).trim();
-      let value = trimmed.slice(eq + 1).trim();
-      if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1);
-      }
-      result[key] = value;
-    }
-    return result;
-  } catch (error) {
-    console.error(`Failed to load env from ${filePath}:`, error.message);
-    return {};
-  }
-}
-
-async function spacebyteJson(url) {
-  const headers = {};
-  if (spacebyteToken) {
-    headers.Authorization = `${spacebyteAuthScheme} ${spacebyteToken}`;
-  }
-
-  const attempt = async () => {
-    const { statusCode, body } = await httpsGetBuffered(url, headers, 20000);
-    if (statusCode < 200 || statusCode >= 300) {
-      const detail = body ? ` - ${body.slice(0, 240)}` : "";
-      throw new Error(`SpaceByte request failed with status ${statusCode}${detail}`);
-    }
-    return JSON.parse(body);
+  const configured = {
+    baseUrl: readString(env, "SPACEBYTE_BASE_URL", "https://spacebyte.in/api/v1"),
+    tokenPresent: Boolean(readString(env, "SPACEBYTE_TOKEN")),
+    sharpAvailable: imageProcessor.isAvailable()
   };
 
   try {
-    return await attempt();
+    await client.ping();
+    return sendJson(response, 200, { ok: true, configured });
   } catch (error) {
-    if (error.message === "Request timed out") {
-      return await attempt();
-    }
-    throw error;
+    return sendJson(response, 502, { ok: false, configured, error: error.message });
   }
 }
 
-// Uses Node's classic https client (not fetch/undici) - avoids the WASM llhttp
-// parser that undici lazily compiles, which OOMs under low LVE memory limits.
-function httpsGetBuffered(url, headers, timeoutMs, redirectsLeft = 5) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, { headers }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirectsLeft <= 0) {
-          reject(new Error("Too many redirects"));
-          return;
-        }
-        const nextUrl = new URL(response.headers.location, url).toString();
-        const nextHeaders = isSameOrigin(url, nextUrl) ? headers : stripAuthHeader(headers);
-        resolve(httpsGetBuffered(nextUrl, nextHeaders, timeoutMs, redirectsLeft - 1));
-        return;
-      }
+// ---------------------------------------------------------------------------
 
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => resolve({ statusCode: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
-      response.on("error", reject);
-    });
-    request.on("error", reject);
-    request.setTimeout(timeoutMs, () => request.destroy(new Error("Request timed out")));
-  });
+function normalizeBasePath(value) {
+  const trimmed = String(value || "").trim().replace(/\/+$/, "");
+  if (!trimmed || trimmed === "/") return "";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
-function httpsGetStream(url, headers, redirectsLeft = 5) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, { headers }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirectsLeft <= 0) {
-          reject(new Error("Too many redirects"));
-          return;
-        }
-        const nextUrl = new URL(response.headers.location, url).toString();
-        const nextHeaders = isSameOrigin(url, nextUrl) ? headers : stripAuthHeader(headers);
-        resolve(httpsGetStream(nextUrl, nextHeaders, redirectsLeft - 1));
-        return;
-      }
-      resolve(response);
-    });
-    request.on("error", reject);
-  });
+function stripBasePath(pathname) {
+  if (!basePath) return pathname;
+  if (pathname === basePath) return "/";
+  return pathname.startsWith(`${basePath}/`) ? pathname.slice(basePath.length) : pathname;
 }
 
-function httpsGetBuffer(url, headers, timeoutMs, redirectsLeft = 5) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, { headers }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirectsLeft <= 0) return reject(new Error("Too many redirects"));
-        const nextUrl = new URL(response.headers.location, url).toString();
-        return resolve(httpsGetBuffer(nextUrl, isSameOrigin(url, nextUrl) ? headers : stripAuthHeader(headers), timeoutMs, redirectsLeft - 1));
-      }
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => resolve({ statusCode: response.statusCode, body: Buffer.concat(chunks) }));
-      response.on("error", reject);
-    });
-    request.on("error", reject);
-    request.setTimeout(timeoutMs, () => request.destroy(new Error("Request timed out")));
-  });
-}
-
-function isSameOrigin(urlA, urlB) {
-  try {
-    const a = new URL(urlA);
-    const b = new URL(urlB);
-    return a.origin === b.origin;
-  } catch {
-    return false;
-  }
-}
-
-function stripAuthHeader(headers) {
-  const { Authorization, authorization, ...rest } = headers || {};
-  return rest;
+function resolveSessionSecret() {
+  const configured = readString(env, "SESSION_SECRET");
+  if (configured) return configured;
+  console.warn("SESSION_SECRET is not set. A temporary secret was generated; viewers are signed out on every restart.");
+  return crypto.randomBytes(32).toString("hex");
 }

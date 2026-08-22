@@ -105,8 +105,9 @@ cannot be used to read arbitrary files from the Drive account.
 ### Google Drive access
 
 Share the **Starz Shots** root folder in Google Drive with the service account's
-`client_email` (Viewer is enough). Put that folder's ID in
-`GOOGLE_DRIVE_ROOT_FOLDER_ID`.
+`client_email`. Grant **Editor** so the client "remove" action can move photos to
+the Google Drive trash (Viewer is enough only if you never use remove). Put that
+folder's ID in `GOOGLE_DRIVE_ROOT_FOLDER_ID`.
 
 ### Required environment variables
 

@@ -1,11 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <base href="/">
   <title>Starz Shots Gallery</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.extra.css" />
 </head>
 <body>
   <main>
@@ -18,7 +18,7 @@
           <label for="viewerId">Your name or email</label>
           <input id="viewerId" name="viewerId" type="text" autocomplete="name" required />
           <label for="accessCode">Access code</label>
-          <input id="accessCode" name="accessCode" type="text" autocomplete="one-time-code" required />
+          <input id="accessCode" name="accessCode" type="password" autocomplete="one-time-code" required />
           <div class="access-row">
             <button type="submit">Open gallery</button>
           </div>
@@ -46,15 +46,15 @@
         <div class="actions">
           <button type="button" id="showAll" class="tab active">All</button>
           <button type="button" id="showFavorites" class="tab">Favorites</button>
-          <span id="favoriteCount" class="role-badge">0 favorites</span>
+          <span id="favoriteCount" class="role-badge">0</span>
           <button type="button" id="downloadAll" class="icon-button">Download all</button>
           <button type="button" id="downloadFavoritesCsv" class="icon-button">Download favorites</button>
         </div>
       </div>
+      <p id="syncNotice" class="sync-notice hidden"></p>
       <section class="gallery-grid" id="galleryGrid"></section>
-      <div class="gallery-pagination" id="galleryPagination" hidden>
-        <button class="load-more-button" id="loadMore" type="button">Load more photos</button>
-      </div>
+      <div id="gridSentinel" class="grid-sentinel"></div>
+      <p id="gridStatus" class="grid-status muted"></p>
     </section>
   </main>
 
@@ -70,10 +70,18 @@
       </div>
       <div class="dialog-actions">
         <button id="lightboxFavorite" type="button">Favorite</button>
-        <button id="lightboxRemove" type="button">Remove</button>
         <a id="lightboxDownload" class="download-button" download>Download</a>
       </div>
     </footer>
+  </dialog>
+
+  <dialog id="downloadDialog" class="download-dialog">
+    <h2>Download all photos</h2>
+    <p class="muted">Large galleries are split into parts so each download stays reliable. Start one part at a time.</p>
+    <div id="downloadParts" class="download-parts"></div>
+    <div class="dialog-actions">
+      <button id="closeDownloadDialog" type="button">Close</button>
+    </div>
   </dialog>
 
   <script src="app.js"></script>
