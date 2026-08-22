@@ -261,12 +261,16 @@ async function handleOriginal(response, gallery, fileId) {
     return sendJson(response, 502, { error: `Google Drive download failed with status ${upstream.statusCode}.` });
   }
 
-  response.writeHead(200, {
+  const downloadHeaders = {
     "Content-Type": upstream.headers["content-type"] || "application/octet-stream",
     "Cache-Control": "private, max-age=3600",
     "Content-Disposition": `attachment; filename="${located.image.filename.replace(/["\\]/g, "_")}"`,
+    // Tell nginx/Passenger to stream instead of buffering the whole file (avoids proxy timeouts on large photos).
+    "X-Accel-Buffering": "no",
     ...SECURITY_HEADERS
-  });
+  };
+  if (upstream.headers["content-length"]) downloadHeaders["Content-Length"] = upstream.headers["content-length"];
+  response.writeHead(200, downloadHeaders);
   return pipeline(upstream, response);
 }
 
@@ -274,13 +278,26 @@ async function handleDeleteImage(response, gallery, fileId) {
   const located = cache.findImage(gallery.slug, fileId);
   if (!located) return sendJson(response, 404, { error: "Photo not found in this gallery." });
 
+  // Record + remove from the gallery first so the photo is gone even if Drive refuses the trash.
+  await cache.recordRemoved(gallery.slug, fileId);
+  await cache.removeImage(gallery.slug, fileId);
+
+  let driveTrashed = true;
+  let driveError = "";
   try {
     await drive.trashFile(fileId);
   } catch (error) {
-    return sendJson(response, 502, { error: `Could not remove the photo from Google Drive: ${error.message}` });
+    driveTrashed = false;
+    driveError = error.message;
   }
 
-  await cache.removeImage(gallery.slug, fileId);
+  return sendJson(response, 200, { ok: true, driveTrashed, driveError });
+}
+
+async function handleDeleteEvent(response, slug) {
+  if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
+  config.remove(slug);
+  await cache.remove(slug);
   return sendJson(response, 200, { ok: true });
 }
 
@@ -327,6 +344,7 @@ async function handleDownloadAll(response, gallery, url) {
     "Content-Type": "application/zip",
     "Content-Disposition": `attachment; filename="${gallery.slug}${suffix}.zip"`,
     "Cache-Control": "no-store",
+    "X-Accel-Buffering": "no",
     ...SECURITY_HEADERS
   });
 
@@ -394,6 +412,10 @@ async function routeAdmin(request, response, segments, url) {
 
   if (request.method === "PUT" && segments[0] === "events" && segments[1] && !segments[2]) {
     return handleUpdateEvent(request, response, decodeURIComponent(segments[1]));
+  }
+
+  if (request.method === "DELETE" && segments[0] === "events" && segments[1] && !segments[2]) {
+    return handleDeleteEvent(response, decodeURIComponent(segments[1]));
   }
 
   if (request.method === "POST" && segments[0] === "browse-google-drive-folders") {

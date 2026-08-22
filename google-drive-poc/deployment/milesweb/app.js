@@ -305,6 +305,7 @@ function createTile(image, index) {
     const download = document.createElement("a");
     download.className = "tile-download";
     download.href = image.downloadUrl;
+    download.target = "_blank";
     download.rel = "noopener";
     download.title = "Download photo";
     download.setAttribute("aria-label", "Download photo");
@@ -392,9 +393,10 @@ function removeImage(image, tile) {
 }
 
 async function deleteImage(image, tile) {
+  let payload = {};
   try {
     const response = await apiFetch(`/files/${encodeURIComponent(image.id)}`, { method: "DELETE" });
-    await response.json().catch(() => ({}));
+    payload = await response.json().catch(() => ({}));
   } catch (error) {
     window.alert(error.message || "Unable to remove the photo.");
     return;
@@ -403,6 +405,10 @@ async function deleteImage(image, tile) {
   state.removed.add(image.id);
   tile.remove();
   if (elements.lightbox.open) elements.lightbox.close();
+
+  if (payload && payload.driveTrashed === false) {
+    window.alert("Photo removed from the gallery. It could not be deleted from Google Drive (the service account lacks permission), so the original file still exists in Drive.");
+  }
 }
 
 async function openDownloadDialog() {

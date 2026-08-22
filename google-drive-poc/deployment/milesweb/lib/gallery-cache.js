@@ -36,6 +36,10 @@ function createGalleryCache(dataDir) {
     return path.join(eventIndexDir(slug), "sync-state.json");
   }
 
+  function removedPath(slug) {
+    return path.join(eventIndexDir(slug), "removed.json");
+  }
+
   function thumbnailPath(slug, sceneDirName, fileId) {
     return path.join(thumbnailsDir, safeSegment(slug), safeSegment(sceneDirName), `${safeSegment(fileId)}.jpg`);
   }
@@ -189,6 +193,17 @@ function createGalleryCache(dataDir) {
     return false;
   }
 
+  function readRemovedIds(slug) {
+    const payload = readJson(removedPath(slug));
+    return Array.isArray(payload?.ids) ? payload.ids : [];
+  }
+
+  async function recordRemoved(slug, fileId) {
+    const ids = new Set(readRemovedIds(slug));
+    ids.add(fileId);
+    await writeJson(removedPath(slug), { ids: [...ids] });
+  }
+
   return {
     thumbnailPath,
     previewPath,
@@ -203,7 +218,9 @@ function createGalleryCache(dataDir) {
     imagesByIds,
     allImages,
     remove,
-    removeImage
+    removeImage,
+    readRemovedIds,
+    recordRemoved
   };
 }
 

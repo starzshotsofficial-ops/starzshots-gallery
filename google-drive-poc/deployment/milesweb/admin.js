@@ -103,6 +103,11 @@ function createEventRow(event) {
   syncButton.className = "icon-button";
   syncButton.textContent = "Rebuild cache";
 
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "icon-button danger";
+  deleteButton.textContent = "Delete event";
+
   const status = document.createElement("span");
   status.className = "row-status muted";
 
@@ -162,7 +167,26 @@ function createEventRow(event) {
     }
   });
 
-  actionsCell.append(saveButton, syncButton, status);
+  deleteButton.addEventListener("click", async () => {
+    status.textContent = "";
+    status.classList.remove("error", "success");
+
+    if (!window.confirm(`Delete '${event.eventName}' and its cached thumbnails? This cannot be undone.`)) return;
+
+    try {
+      const response = await adminFetch(`/events/${encodeURIComponent(event.slug)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Unable to delete event.");
+      }
+      row.remove();
+    } catch (error) {
+      status.textContent = error.message || "Unable to delete event.";
+      status.classList.add("error");
+    }
+  });
+
+  actionsCell.append(saveButton, syncButton, deleteButton, status);
   row.append(actionsCell);
   return row;
 }

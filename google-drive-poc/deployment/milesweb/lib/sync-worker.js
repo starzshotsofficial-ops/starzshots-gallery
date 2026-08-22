@@ -10,6 +10,7 @@ const { normalizeName } = require("./drive-client");
 const { sourceSignature } = require("./config-store");
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "tif", "tiff"]);
+const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 /**
  * Background job that mirrors the Drive listing plus a low-resolution thumbnail for
@@ -53,12 +54,16 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
         await syncGallery(slug, force);
       } catch (error) {
         logger.error(`[sync] ${slug} failed: ${error.message}`);
-        await cache.writeSyncState(slug, {
-          ...cache.readSyncState(slug),
-          status: "error",
-          error: error.message,
-          finishedAt: new Date().toISOString()
-        });
+        try {
+          await cache.writeSyncState(slug, {
+            ...cache.readSyncState(slug),
+            status: "error",
+            error: error.message,
+            finishedAt: new Date().toISOString()
+          });
+        } catch {
+          // The event may have been deleted mid-sync; nothing more to record.
+        }
       } finally {
         queue.shift();
         queued.delete(slug);
@@ -76,33 +81,29 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
     await cache.writeSyncState(slug, { status: "listing", startedAt, totalImages: 0, cachedThumbnails: 0, error: "" });
 
     const eventFolderId = await drive.resolveEventFolderId(gallery);
-    const childFolders = await drive.listFiles(eventFolderId, true);
-    const configuredScenes =
-      Array.isArray(gallery.sceneFolderNames) && gallery.sceneFolderNames.length
-        ? gallery.sceneFolderNames
-        : childFolders.map((folder) => folder.name);
+    const configuredNames = Array.isArray(gallery.sceneFolderNames) ? gallery.sceneFolderNames.filter(Boolean) : [];
+    const discoveredScenes = await discoverScenes(eventFolderId, configuredNames);
+    const removedIds = new Set(cache.readRemovedIds(slug));
 
-    const foldersByName = new Map(childFolders.map((folder) => [normalizeName(folder.name), folder]));
     const scenes = [];
     const pending = [];
     let sceneNumber = 0;
 
-    for (const sceneName of configuredScenes) {
-      const folder = foldersByName.get(normalizeName(sceneName));
-      if (!folder) continue;
+    for (const discovered of discoveredScenes) {
+      const imageFiles = discovered.files.filter((file) => !removedIds.has(file.id));
+      if (!imageFiles.length) continue;
 
       sceneNumber += 1;
-      const files = await drive.listFiles(folder.id, false);
-      const images = files
-        .filter(isImage)
+      const images = imageFiles
+        .slice()
         .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }))
         .map((file) => ({ id: file.id, name: file.name, mimeType: file.mimeType, size: Number(file.size || 0) }));
 
-      const dirName = safeSegment(sceneName);
+      const dirName = safeSegment(discovered.name);
       await cache.writeScene(slug, sceneNumber, images);
-      scenes.push({ number: sceneNumber, name: sceneName, dirName, folderId: folder.id, count: images.length });
+      scenes.push({ number: sceneNumber, name: discovered.name, dirName, folderId: discovered.folderId, count: images.length });
 
-      for (const file of files.filter(isImage)) {
+      for (const file of imageFiles) {
         const targetPath = cache.thumbnailPath(slug, dirName, file.id);
         if (!force && fs.existsSync(targetPath)) continue;
         pending.push({ file, targetPath });
@@ -149,6 +150,35 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
     });
 
     logger.log(`[sync] ${slug}: ${totalImages} photos indexed, ${cached - failed} thumbnails cached, ${failed} deferred.`);
+  }
+
+  // Walks the event folder tree so nested sub-folders (Event > Album > Card 1 > ...) each become a scene automatically.
+  async function discoverScenes(eventFolderId, configuredNames) {
+    if (configuredNames.length) {
+      const childFolders = await drive.listFiles(eventFolderId, true);
+      const byName = new Map(childFolders.map((folder) => [normalizeName(folder.name), folder]));
+      const scenes = [];
+      for (const name of configuredNames) {
+        const folder = byName.get(normalizeName(name));
+        if (folder) scenes.push(...(await collectScenes(folder.id, folder.name)));
+      }
+      return scenes;
+    }
+    return collectScenes(eventFolderId, "");
+  }
+
+  async function collectScenes(folderId, prefix) {
+    const entries = await drive.listFiles(folderId, false);
+    const subfolders = entries.filter((entry) => entry.mimeType === FOLDER_MIME);
+    const imageFiles = entries.filter(isImage);
+
+    const scenes = [];
+    if (imageFiles.length) scenes.push({ name: prefix || "Photos", folderId, files: imageFiles });
+    for (const subfolder of subfolders) {
+      const childPrefix = prefix ? `${prefix} / ${subfolder.name}` : subfolder.name;
+      scenes.push(...(await collectScenes(subfolder.id, childPrefix)));
+    }
+    return scenes;
   }
 
   async function cacheThumbnail(file, targetPath) {

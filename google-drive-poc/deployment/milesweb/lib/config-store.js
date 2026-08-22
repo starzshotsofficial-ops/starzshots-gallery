@@ -25,6 +25,14 @@ function createConfigStore(filePath) {
     return gallery;
   }
 
+  function remove(slug) {
+    const before = data.galleries.length;
+    data.galleries = data.galleries.filter((gallery) => gallery.slug !== slug);
+    const removed = data.galleries.length !== before;
+    if (removed) save();
+    return removed;
+  }
+
   function save() {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
@@ -34,7 +42,7 @@ function createConfigStore(filePath) {
     data = readConfig(filePath);
   }
 
-  return { list, find, add, save, reload };
+  return { list, find, add, remove, save, reload };
 }
 
 function readConfig(filePath) {
