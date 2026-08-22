@@ -264,7 +264,7 @@ async function handleOriginal(response, gallery, fileId) {
   const downloadHeaders = {
     "Content-Type": upstream.headers["content-type"] || "application/octet-stream",
     "Cache-Control": "private, max-age=3600",
-    "Content-Disposition": `attachment; filename="${located.image.filename.replace(/["\\]/g, "_")}"`,
+    "Content-Disposition": `attachment; filename="${String(located.image.name || located.image.filename || "photo.jpg").replace(/["\\]/g, "_")}"`,
     // Tell nginx/Passenger to stream instead of buffering the whole file (avoids proxy timeouts on large photos).
     "X-Accel-Buffering": "no",
     ...SECURITY_HEADERS
