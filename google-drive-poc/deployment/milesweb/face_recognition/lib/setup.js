@@ -27,7 +27,9 @@ function createSetup({ moduleDir, modelsDir, logger = console, autoInstall = tru
 
   function depsInstalled() {
     try {
-      require.resolve("@vladmandic/face-api");
+      require.resolve("@vladmandic/face-api/dist/face-api.node-wasm.js");
+      require.resolve("@tensorflow/tfjs");
+      require.resolve("@tensorflow/tfjs-backend-wasm");
       require.resolve("jpeg-js");
       return true;
     } catch {

@@ -13,6 +13,8 @@
  * own auto-install) before they are present on disk.
  */
 
+const path = require("path");
+
 function createFaceEngine({
   modelsDir,
   detector = "tiny",
@@ -26,17 +28,36 @@ function createFaceEngine({
 
   function loadPackages() {
     if (!faceapi) {
-      faceapi = require("@vladmandic/face-api");
+      // The package default (dist/face-api.node.js) pulls the NATIVE @tensorflow/tfjs-node,
+      // which cannot be installed on shared hosting. node-wasm.js is the pure-JS build.
+      faceapi = require("@vladmandic/face-api/dist/face-api.node-wasm.js");
       jpeg = require("jpeg-js");
       tf = faceapi.tf;
     }
+  }
+
+  /** WASM is much faster than the plain JS CPU kernels; fall back to CPU if it cannot start. */
+  async function selectBackend() {
+    try {
+      const wasm = require("@tensorflow/tfjs-backend-wasm");
+      const wasmDist = path.join(path.dirname(require.resolve("@tensorflow/tfjs-backend-wasm/package.json")), "dist");
+      wasm.setWasmPaths(wasmDist + path.sep);
+      if (await tf.setBackend("wasm")) {
+        await tf.ready();
+        return;
+      }
+    } catch {
+      // Fall through to the always-available CPU backend.
+    }
+    await tf.setBackend("cpu");
+    await tf.ready();
   }
 
   async function ensureLoaded() {
     if (!loadPromise) {
       loadPromise = (async () => {
         loadPackages();
-        await tf.ready();
+        await selectBackend();
         await faceapi.nets.faceLandmark68Net.loadFromDisk(modelsDir);
         await faceapi.nets.faceRecognitionNet.loadFromDisk(modelsDir);
         if (detector === "ssd") await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsDir);

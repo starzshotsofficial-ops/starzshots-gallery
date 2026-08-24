@@ -8,6 +8,8 @@
     "setup": "node download-models.js"
   },
   "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "jpeg-js": "^0.4.4"
   },
