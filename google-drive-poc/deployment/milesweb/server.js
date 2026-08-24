@@ -74,8 +74,10 @@ const face = createFaceRecognition({
     minFaceSize: readNumber(env, "FACE_MIN_FACE_SIZE", 34),
     minScore: Number(readString(env, "FACE_MIN_SCORE", "0.4")) || 0.4,
     maxDetected: readNumber(env, "FACE_MAX_DETECTED", 100),
-    modelBasePath: readString(env, "FACE_MODEL_BASE_PATH", "https://vladmandic.github.io/human-models/models/"),
-    wasmPath: readString(env, "FACE_WASM_PATH", "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/")
+    // Empty by default: index.js points these at the locally downloaded models/wasm files.
+    // Only set FACE_MODEL_BASE_PATH / FACE_WASM_PATH to force a CDN instead.
+    modelBasePath: readString(env, "FACE_MODEL_BASE_PATH", ""),
+    wasmPath: readString(env, "FACE_WASM_PATH", "")
   }
 });
 

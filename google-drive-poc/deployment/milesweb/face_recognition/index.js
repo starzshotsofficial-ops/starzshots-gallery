@@ -34,10 +34,12 @@ function createFaceRecognition({
   options = {}
 }) {
   const publicDir = path.join(__dirname, "public");
+  const modelsDir = path.join(__dirname, "models");
 
   const engine = createFaceEngine({
-    modelBasePath: options.modelBasePath || "https://vladmandic.github.io/human-models/models/",
-    wasmPath: options.wasmPath || "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/",
+    // Loaded from local disk (downloaded once by setup) so runtime never depends on the CDN.
+    modelBasePath: options.modelBasePath || `file://${modelsDir}${path.sep}`,
+    wasmPath: options.wasmPath,
     matchThreshold: options.matchThreshold ?? 0.4,
     minFaceSize: options.minFaceSize ?? 34,
     minScore: options.minScore ?? 0.4,
@@ -46,6 +48,7 @@ function createFaceRecognition({
   const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger, faceImageSize: options.faceImageSize ?? 2048 });
   const setup = createSetup({
     moduleDir: __dirname,
+    modelsDir,
     logger,
     autoInstall: options.autoInstall !== false
   });

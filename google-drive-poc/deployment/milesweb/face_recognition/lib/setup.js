@@ -2,9 +2,10 @@
 
 /**
  * Runtime auto-setup so the feature works from a plain `npm start` with no manual
- * `npm install`. On first start (when needed) it installs @vladmandic/human +
- * jpeg-js into face_recognition/node_modules. The model weights are fetched by
- * Human from its CDN at load time, so there is nothing to download here.
+ * `npm install`. On first start (when needed) it:
+ *   1. installs @vladmandic/human + jpeg-js into face_recognition/node_modules
+ *   2. downloads the model weights into face_recognition/models (once, then loaded
+ *      from local disk on every subsequent boot — no CDN dependency at runtime)
  * The install is guarded so concurrent Passenger workers don't install twice.
  */
 
@@ -13,12 +14,14 @@ const fsp = fs.promises;
 const path = require("path");
 const { spawn } = require("child_process");
 
+const { modelsInstalled, downloadModels } = require("./models");
+
 const LOCK_STALE_MS = 20 * 60 * 1000;
 const RETRY_COOLDOWN_MS = 30 * 1000;
 
-function createSetup({ moduleDir, logger = console, autoInstall = true }) {
+function createSetup({ moduleDir, modelsDir, logger = console, autoInstall = true }) {
   const lockPath = path.join(moduleDir, ".setup.lock");
-  const state = { deps: "unknown", models: "ready", error: "", progress: null };
+  const state = { deps: "unknown", models: "unknown", error: "", progress: null };
   let running = null;
   let cooldownUntil = 0;
 
@@ -48,14 +51,13 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
   }
 
   function ready() {
-    // Human downloads its own model weights from the CDN at load time, so deps are all we gate on.
-    return depsInstalled();
+    return depsInstalled() && modelsInstalled(modelsDir);
   }
 
   function snapshot() {
     return {
       deps: depsInstalled() ? "ready" : state.deps,
-      models: "ready",
+      models: modelsInstalled(modelsDir) ? "ready" : state.models,
       ready: ready(),
       error: state.error,
       progress: state.progress
@@ -120,6 +122,20 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
     });
   }
 
+  async function fetchModels() {
+    state.models = "downloading";
+    logger.log("[face] downloading face models (one-time)…");
+    await downloadModels({
+      modelsDir,
+      onProgress: (info) => {
+        state.progress = { phase: "models", file: info.file, done: info.done, total: info.total };
+      }
+    });
+    state.models = "ready";
+    state.progress = null;
+    logger.log("[face] models ready.");
+  }
+
   /** Kicks off setup in the background if anything is missing. Resolves to the readiness. */
   function ensureReady() {
     if (ready()) {
@@ -141,6 +157,7 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
             await installDeps();
           }
         }
+        if (depsInstalled() && !modelsInstalled(modelsDir)) await fetchModels();
       } catch (error) {
         state.error = error.message;
         logger.error(`[face] setup failed: ${error.message}`);
