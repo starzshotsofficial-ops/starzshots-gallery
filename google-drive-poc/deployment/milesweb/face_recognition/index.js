@@ -42,7 +42,7 @@ function createFaceRecognition({
     minConfidence: options.minConfidence ?? 0.5,
     matchThreshold: options.matchThreshold ?? 0.5
   });
-  const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize });
+  const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger });
   const setup = createSetup({
     moduleDir: __dirname,
     modelsDir,
@@ -120,7 +120,8 @@ function createFaceRecognition({
       let descriptor;
       try {
         descriptor = await engine.describeLargest(buffer);
-      } catch {
+      } catch (error) {
+        logger.error(`[face] selfie read failed for ${slug}: ${error.message}`);
         return sendJson(response, 422, { error: "That photo could not be read. Try a clear, front-facing selfie." });
       }
       if (!descriptor) return sendJson(response, 200, { status: "no-face" });

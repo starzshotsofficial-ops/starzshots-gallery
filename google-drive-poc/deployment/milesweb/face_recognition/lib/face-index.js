@@ -16,7 +16,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 
-function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpointEvery = 20 }) {
+function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger = console, checkpointEvery = 20 }) {
   const facesDir = path.join(dataDir, "faces");
   const jobs = new Map();
   const buildQueue = [];
@@ -111,12 +111,18 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
     const job = { status: "running", processed: 0, total: images.length };
     jobs.set(slug, job);
 
+    let reused = 0;
+    let detected = 0;
+    let failures = 0;
+    let firstError = null;
+
     try {
       const results = [];
       for (const image of images) {
         job.processed += 1;
 
         if (done.has(image.id)) {
+          reused += 1;
           results.push(done.get(image.id));
           continue;
         }
@@ -125,8 +131,10 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
         try {
           const buffer = await thumbnailBuffer(slug, image);
           if (buffer) record.faces = await engine.describeAll(buffer);
-        } catch {
-          // A single unreadable photo must never abort the whole index.
+          detected += record.faces.length;
+        } catch (error) {
+          failures += 1;
+          if (!firstError) firstError = error;
         }
         results.push(record);
 
@@ -137,9 +145,14 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
 
       await writeIndex(slug, buildPayload(slug, images.length, results));
       job.status = "done";
+      logger.log(
+        `[face] index built for ${slug}: ${images.length} images, ${detected} faces, ${reused} reused, ${failures} failures.`
+      );
+      if (firstError) logger.error(`[face] first indexing error for ${slug}: ${firstError.message}`);
     } catch (error) {
       job.status = "error";
       job.error = error.message;
+      logger.error(`[face] index build failed for ${slug}: ${error.message}`);
     }
   }
 
