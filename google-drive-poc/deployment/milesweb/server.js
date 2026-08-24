@@ -69,12 +69,13 @@ const face = createFaceRecognition({
   readJsonBody,
   SECURITY_HEADERS,
   options: {
-    detector: readString(env, "FACE_DETECTOR", "tiny"),
-    matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.5")) || 0.5,
+    matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.4")) || 0.4,
     faceImageSize: readNumber(env, "FACE_IMAGE_SIZE", 2048),
-    detectorInputSize: readNumber(env, "FACE_DETECTOR_INPUT_SIZE", 800),
     minFaceSize: readNumber(env, "FACE_MIN_FACE_SIZE", 34),
-    minScore: Number(readString(env, "FACE_MIN_SCORE", "0.55")) || 0.55
+    minScore: Number(readString(env, "FACE_MIN_SCORE", "0.4")) || 0.4,
+    maxDetected: readNumber(env, "FACE_MAX_DETECTED", 100),
+    modelBasePath: readString(env, "FACE_MODEL_BASE_PATH", "https://vladmandic.github.io/human-models/models/"),
+    wasmPath: readString(env, "FACE_WASM_PATH", "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/")
   }
 });
 

@@ -1,55 +1,60 @@
 "use strict";
 
 /**
- * Runs all face detection / description on a dedicated worker thread so the
- * CPU-bound WASM inference never blocks the main event loop that serves the
- * gallery. The main thread only does async Drive I/O and posts image buffers
- * here; this worker replies with descriptors.
+ * Runs all face detection / description on a dedicated worker thread (so the
+ * gallery event loop stays responsive) using @vladmandic/human — a modern,
+ * pure-JS/WASM successor to face-api with stronger detection and embeddings.
+ *
+ * Models and the WASM binaries load from a CDN by default (override with
+ * FACE_MODEL_BASE_PATH / FACE_WASM_PATH), so nothing native is compiled on the host.
+ *
+ * Embeddings are L2-normalized here so the main thread can match with cosine
+ * distance (1 - dot); lower = more similar.
  */
 
-const path = require("path");
 const { parentPort, workerData } = require("worker_threads");
 
-const { modelsDir, detector, minConfidence, minFaceSize, minScore, detectorInputSize } = workerData;
+const { modelBasePath, wasmPath, maxDetected, minFaceSize, minScore } = workerData;
 
-let faceapi = null;
+let Human = null;
 let jpeg = null;
-let tf = null;
+let human = null;
 let loadPromise = null;
 
-function loadPackages() {
-  if (!faceapi) {
-    faceapi = require("@vladmandic/face-api/dist/face-api.node-wasm.js");
-    jpeg = require("jpeg-js");
-    tf = faceapi.tf;
-  }
-}
-
-async function selectBackend() {
-  try {
-    const wasm = require("@tensorflow/tfjs-backend-wasm");
-    const wasmDist = path.join(path.dirname(require.resolve("@tensorflow/tfjs-backend-wasm/package.json")), "dist");
-    wasm.setWasmPaths(wasmDist + path.sep);
-    if (await tf.setBackend("wasm")) {
-      await tf.ready();
-      return;
-    }
-  } catch {
-    // Fall through to the always-available CPU backend.
-  }
-  await tf.setBackend("cpu");
-  await tf.ready();
+function humanConfig() {
+  return {
+    backend: "wasm",
+    wasmPath,
+    modelBasePath,
+    cacheSensitivity: 0,
+    debug: false,
+    filter: { enabled: false },
+    face: {
+      enabled: true,
+      detector: { maxDetected: maxDetected || 100, minConfidence: minScore || 0.3, rotation: false, return: false },
+      mesh: { enabled: true },
+      iris: { enabled: false },
+      description: { enabled: true },
+      emotion: { enabled: false },
+      antispoof: { enabled: false },
+      liveness: { enabled: false }
+    },
+    body: { enabled: false },
+    hand: { enabled: false },
+    object: { enabled: false },
+    gesture: { enabled: false }
+  };
 }
 
 function ensureLoaded() {
   if (!loadPromise) {
     loadPromise = (async () => {
-      loadPackages();
-      await selectBackend();
-      await faceapi.nets.faceLandmark68Net.loadFromDisk(modelsDir);
-      await faceapi.nets.faceRecognitionNet.loadFromDisk(modelsDir);
-      if (detector === "ssd") await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsDir);
-      else await faceapi.nets.tinyFaceDetector.loadFromDisk(modelsDir);
+      const mod = require("@vladmandic/human");
+      Human = mod.default || mod.Human;
+      jpeg = require("jpeg-js");
+      human = new Human(humanConfig());
+      await human.load();
+      await human.tf.ready();
     })().catch((error) => {
       loadPromise = null;
       throw error;
@@ -58,12 +63,7 @@ function ensureLoaded() {
   return loadPromise;
 }
 
-function detectorOptions() {
-  return detector === "ssd"
-    ? new faceapi.SsdMobilenetv1Options({ minConfidence })
-    : new faceapi.TinyFaceDetectorOptions({ inputSize: detectorInputSize || 608, scoreThreshold: minConfidence });
-}
-
+/** Decodes a JPEG buffer into a Human tf int32 [height, width, 3] RGB tensor. */
 function decodeToTensor(buffer) {
   const { width, height, data } = jpeg.decode(buffer, { useTArray: true, maxMemoryUsageInMB: 1024 });
   const pixelCount = width * height;
@@ -73,25 +73,34 @@ function decodeToTensor(buffer) {
     rgb[i * 3 + 1] = data[i * 4 + 1];
     rgb[i * 3 + 2] = data[i * 4 + 2];
   }
-  return tf.tensor3d(rgb, [height, width, 3], "int32");
+  return human.tf.tensor3d(rgb, [height, width, 3], "int32");
+}
+
+function l2normalize(vector) {
+  let sum = 0;
+  for (let i = 0; i < vector.length; i += 1) sum += vector[i] * vector[i];
+  const norm = Math.sqrt(sum) || 1;
+  return vector.map((value) => value / norm);
+}
+
+function faceSize(face) {
+  const box = face.box || [0, 0, 0, 0];
+  return Math.min(box[2], box[3]);
+}
+
+function usableFace(face) {
+  const score = face.faceScore ?? face.score ?? face.boxScore ?? 0;
+  return Array.isArray(face.embedding) && faceSize(face) >= minFaceSize && score >= minScore;
 }
 
 async function describeAll(buffer) {
   await ensureLoaded();
   const tensor = decodeToTensor(buffer);
   try {
-    const results = await faceapi
-      .detectAllFaces(tensor, detectorOptions())
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-    return results
-      .filter((result) => {
-        const box = result.detection.box;
-        return Math.min(box.width, box.height) >= minFaceSize && result.detection.score >= minScore;
-      })
-      .map((result) => Array.from(result.descriptor));
+    const result = await human.detect(tensor);
+    return (result.face || []).filter(usableFace).map((face) => l2normalize(Array.from(face.embedding)));
   } finally {
-    tensor.dispose();
+    human.tf.dispose(tensor);
   }
 }
 
@@ -99,13 +108,13 @@ async function describeLargest(buffer) {
   await ensureLoaded();
   const tensor = decodeToTensor(buffer);
   try {
-    const result = await faceapi
-      .detectSingleFace(tensor, detectorOptions())
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-    return result ? Array.from(result.descriptor) : null;
+    const result = await human.detect(tensor);
+    const faces = (result.face || []).filter((face) => Array.isArray(face.embedding));
+    if (!faces.length) return null;
+    const largest = faces.reduce((best, face) => (faceSize(face) > faceSize(best) ? face : best));
+    return l2normalize(Array.from(largest.embedding));
   } finally {
-    tensor.dispose();
+    human.tf.dispose(tensor);
   }
 }
 

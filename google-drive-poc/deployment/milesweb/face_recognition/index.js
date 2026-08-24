@@ -33,22 +33,19 @@ function createFaceRecognition({
   logger = console,
   options = {}
 }) {
-  const modelsDir = path.join(__dirname, "models");
   const publicDir = path.join(__dirname, "public");
 
   const engine = createFaceEngine({
-    modelsDir,
-    detector: options.detector || "tiny",
-    minConfidence: options.minConfidence ?? 0.5,
-    matchThreshold: options.matchThreshold ?? 0.5,
+    modelBasePath: options.modelBasePath || "https://vladmandic.github.io/human-models/models/",
+    wasmPath: options.wasmPath || "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/",
+    matchThreshold: options.matchThreshold ?? 0.4,
     minFaceSize: options.minFaceSize ?? 34,
-    minScore: options.minScore ?? 0.55,
-    detectorInputSize: options.detectorInputSize ?? 800
+    minScore: options.minScore ?? 0.4,
+    maxDetected: options.maxDetected ?? 100
   });
   const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger, faceImageSize: options.faceImageSize ?? 2048 });
   const setup = createSetup({
     moduleDir: __dirname,
-    modelsDir,
     logger,
     autoInstall: options.autoInstall !== false
   });
@@ -107,7 +104,7 @@ function createFaceRecognition({
     }
 
     if (request.method === "POST" && action === "search") {
-      const body = await readJsonBody(request, 4 * 1024 * 1024);
+      const body = await readJsonBody(request, 12 * 1024 * 1024);
       const buffer = decodeSelfie(body.image);
       if (!buffer) return sendJson(response, 400, { error: "Please choose a clear selfie photo." });
 

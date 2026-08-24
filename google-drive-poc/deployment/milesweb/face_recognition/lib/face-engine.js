@@ -2,24 +2,24 @@
 
 /**
  * Proxy in front of the inference worker thread. All heavy face detection /
- * description runs in lib/inference-worker.js so the gallery's event loop stays
- * responsive while a (possibly hours-long) index build is running.
+ * description runs in lib/inference-worker.js (using @vladmandic/human) so the
+ * gallery's event loop stays responsive while a (possibly hours-long) index
+ * build is running.
  *
- * Faces are matched by Euclidean distance between 128-float descriptors; below
- * `matchThreshold` = same person.
+ * Embeddings are L2-normalized in the worker, so faces are matched here with
+ * cosine distance (1 - dot); below `matchThreshold` = same person.
  */
 
 const path = require("path");
 const { Worker } = require("worker_threads");
 
 function createFaceEngine({
-  modelsDir,
-  detector = "tiny",
-  minConfidence = 0.5,
-  matchThreshold = 0.5,
+  modelBasePath,
+  wasmPath,
+  matchThreshold = 0.4,
   minFaceSize = 34,
-  minScore = 0.55,
-  detectorInputSize = 608
+  minScore = 0.4,
+  maxDetected = 100
 }) {
   let worker = null;
   let seq = 0;
@@ -28,7 +28,7 @@ function createFaceEngine({
   function ensureWorker() {
     if (worker) return worker;
     worker = new Worker(path.join(__dirname, "inference-worker.js"), {
-      workerData: { modelsDir, detector, minConfidence, minFaceSize, minScore, detectorInputSize }
+      workerData: { modelBasePath, wasmPath, maxDetected, minFaceSize, minScore }
     });
     worker.on("message", (message) => {
       const entry = pending.get(message.id);
@@ -71,13 +71,11 @@ function createFaceEngine({
     return run("describeLargest", buffer);
   }
 
+  // Cosine distance on L2-normalized embeddings: 0 = identical, up to 2 = opposite.
   function distance(a, b) {
-    let sum = 0;
-    for (let i = 0; i < a.length; i += 1) {
-      const diff = a[i] - b[i];
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum);
+    let dot = 0;
+    for (let i = 0; i < a.length; i += 1) dot += a[i] * b[i];
+    return 1 - dot;
   }
 
   return { ensureLoaded, describeAll, describeLargest, distance, matchThreshold };
