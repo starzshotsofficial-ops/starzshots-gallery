@@ -40,9 +40,12 @@ function createFaceRecognition({
     modelsDir,
     detector: options.detector || "tiny",
     minConfidence: options.minConfidence ?? 0.5,
-    matchThreshold: options.matchThreshold ?? 0.5
+    matchThreshold: options.matchThreshold ?? 0.5,
+    minFaceSize: options.minFaceSize ?? 34,
+    minScore: options.minScore ?? 0.55,
+    detectorInputSize: options.detectorInputSize ?? 800
   });
-  const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger });
+  const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger, faceImageSize: options.faceImageSize ?? 2048 });
   const setup = createSetup({
     moduleDir: __dirname,
     modelsDir,
