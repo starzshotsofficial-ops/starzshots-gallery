@@ -46,6 +46,7 @@ const elements = {
   showFavorites: document.querySelector("#showFavorites"),
   downloadAll: document.querySelector("#downloadAll"),
   downloadFavoritesCsv: document.querySelector("#downloadFavoritesCsv"),
+  findMyPhotos: document.querySelector("#findMyPhotos"),
   visitorRole: document.querySelector("#visitorRole"),
   favoriteCount: document.querySelector("#favoriteCount"),
   lightbox: document.querySelector("#lightbox"),
@@ -136,6 +137,10 @@ async function openGallery() {
   elements.eventDate.textContent = formatDate(state.summary.eventDate);
   elements.clientName.textContent = state.summary.clientName;
   elements.visitorRole.textContent = `${state.role === "client" ? "Client" : "Guest"}: ${state.viewerLabel}`;
+
+  if (elements.findMyPhotos) {
+    elements.findMyPhotos.href = `${basePath}/find-my-photos?event=${encodeURIComponent(gallerySlug)}`;
+  }
 
   applyPermissions();
   renderSyncNotice();
