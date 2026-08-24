@@ -26,10 +26,18 @@ let loadPromise = null;
 // the tfjs Human uses; fall back to whatever wasmPath was configured (e.g. a CDN).
 function resolveWasmPath() {
   try {
-    return path.join(path.dirname(require.resolve("@tensorflow/tfjs-backend-wasm/package.json")), "dist") + path.sep;
+    // Resolve the bare package (allowed by exports), then use its dist dir which holds the .wasm files.
+    return path.dirname(require.resolve("@tensorflow/tfjs-backend-wasm")) + path.sep;
   } catch {
     return wasmPath;
   }
+}
+
+// Human's exports map blocks deep subpaths (incl. package.json), so derive the node-wasm
+// build from the resolvable main entry (dist/human.node.js) — its sibling in the same dist dir.
+function humanWasmEntry() {
+  const mainEntry = require.resolve("@vladmandic/human");
+  return path.join(path.dirname(mainEntry), "human.node-wasm.js");
 }
 
 function humanConfig() {
@@ -55,13 +63,6 @@ function humanConfig() {
     object: { enabled: false },
     gesture: { enabled: false }
   };
-}
-
-// Human's package.json "exports" map blocks the /dist/ subpath, so load the pure-JS
-// node-wasm build by absolute path (package.json is always resolvable) to bypass it.
-function humanWasmEntry() {
-  const humanDir = path.dirname(require.resolve("@vladmandic/human/package.json"));
-  return path.join(humanDir, "dist", "human.node-wasm.js");
 }
 
 function ensureLoaded() {

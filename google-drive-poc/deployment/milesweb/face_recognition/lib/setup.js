@@ -26,9 +26,10 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
   function missingDeps() {
     const missing = [];
     try {
-      const humanDir = path.dirname(require.resolve("@vladmandic/human/package.json"));
-      const entry = path.join(humanDir, "dist", "human.node-wasm.js");
-      if (!fs.existsSync(entry)) missing.push(`human.node-wasm.js (missing at ${entry})`);
+      // Resolve the bare package (allowed by exports), then check the node-wasm build's presence.
+      const mainEntry = require.resolve("@vladmandic/human");
+      const wasmEntry = path.join(path.dirname(mainEntry), "human.node-wasm.js");
+      if (!fs.existsSync(wasmEntry)) missing.push(`human.node-wasm.js (missing at ${wasmEntry})`);
     } catch (error) {
       missing.push(`@vladmandic/human (${error.code || error.message})`);
     }
