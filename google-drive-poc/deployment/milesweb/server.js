@@ -12,6 +12,7 @@ const { loadEnvFile, readString, readNumber, readBoolean } = require("./lib/env"
 const { createConfigStore, createAccessCodes, getAccessCode, setAccessCode, matchAccessCode, toSlug, sourceSignature } = require("./lib/config-store");
 const { createDriveClient } = require("./lib/drive-client");
 const { createGalleryCache } = require("./lib/gallery-cache");
+const { createFavoritesStore } = require("./lib/favorites-store");
 const { createSyncWorker } = require("./lib/sync-worker");
 const { createSessionManager, timingSafeEqual } = require("./lib/session");
 const { ZipWriter } = require("./lib/zip-writer");
@@ -34,6 +35,7 @@ const maxPageSize = 120;
 
 const config = createConfigStore(path.join(rootDir, "config", "galleries.json"));
 const cache = createGalleryCache(dataDir);
+const favorites = createFavoritesStore(dataDir);
 const drive = createDriveClient({
   env,
   allowInsecureTls: readBoolean(env, "GOOGLE_DRIVE_ALLOW_INSECURE_TLS", false),
@@ -117,6 +119,8 @@ async function routeGallery(request, response, segments, url) {
   if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
   if (request.method === "GET" && action === "images") return handleImages(response, gallery, url);
   if (request.method === "POST" && action === "images-by-id") return handleImagesById(request, response, gallery);
+  if (request.method === "GET" && action === "favorites") return handleGetFavorites(response, gallery, session);
+  if (request.method === "PUT" && action === "favorites") return handleSaveFavorites(request, response, gallery, session);
   if (request.method === "GET" && action === "thumbs") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "thumb");
   if (request.method === "GET" && action === "previews") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "preview");
 
@@ -198,6 +202,20 @@ async function handleImagesById(request, response, gallery) {
   const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 2000) : [];
   const images = cache.imagesByIds(gallery.slug, ids).map((image) => withUrls(gallery.slug, image));
   return sendJson(response, 200, { images });
+}
+
+function handleGetFavorites(response, gallery, session) {
+  const ids = favorites.read(gallery.slug, session.role, session.viewerId);
+  return sendJson(response, 200, { ids });
+}
+
+async function handleSaveFavorites(request, response, gallery, session) {
+  if (!session.permissions?.canFavorite) return sendJson(response, 403, { error: "Favorites are not enabled for this access code." });
+
+  const body = await readJsonBody(request);
+  const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 5000) : [];
+  const saved = await favorites.write(gallery.slug, session.role, session.viewerId, ids);
+  return sendJson(response, 200, { ids: saved });
 }
 
 function withUrls(slug, image) {
