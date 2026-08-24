@@ -67,14 +67,19 @@ function humanWasmEntry() {
 function ensureLoaded() {
   if (!loadPromise) {
     loadPromise = (async () => {
-      const mod = require(humanWasmEntry());
+      const entry = humanWasmEntry();
+      console.log(`[face] worker loading Human from ${entry} (wasmPath=${resolveWasmPath()}, models=${modelBasePath})`);
+      const mod = require(entry);
       Human = mod.default || mod.Human || mod;
       jpeg = require("jpeg-js");
       human = new Human(humanConfig());
       await human.load();
       await human.tf.ready();
+      const loaded = Object.keys(human.models || {}).filter((name) => human.models[name]);
+      console.log(`[face] worker ready — backend=${human.tf.getBackend()} models=[${loaded.join(", ")}]`);
     })().catch((error) => {
       loadPromise = null;
+      console.error(`[face] worker load failed: ${error.stack || error.message}`);
       throw error;
     });
   }

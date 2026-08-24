@@ -22,18 +22,28 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
   let running = null;
   let cooldownUntil = 0;
 
-  function depsInstalled() {
+  // Returns the list of missing/unresolvable dependencies (empty = all present).
+  function missingDeps() {
+    const missing = [];
     try {
-      // Human's exports map blocks the /dist/ subpath, so check the file directly.
       const humanDir = path.dirname(require.resolve("@vladmandic/human/package.json"));
-      if (!fs.existsSync(path.join(humanDir, "dist", "human.node-wasm.js"))) return false;
-      require.resolve("@tensorflow/tfjs");
-      require.resolve("@tensorflow/tfjs-backend-wasm");
-      require.resolve("jpeg-js");
-      return true;
-    } catch {
-      return false;
+      const entry = path.join(humanDir, "dist", "human.node-wasm.js");
+      if (!fs.existsSync(entry)) missing.push(`human.node-wasm.js (missing at ${entry})`);
+    } catch (error) {
+      missing.push(`@vladmandic/human (${error.code || error.message})`);
     }
+    for (const dep of ["@tensorflow/tfjs", "@tensorflow/tfjs-backend-wasm", "jpeg-js"]) {
+      try {
+        require.resolve(dep);
+      } catch (error) {
+        missing.push(`${dep} (${error.code || error.message})`);
+      }
+    }
+    return missing;
+  }
+
+  function depsInstalled() {
+    return missingDeps().length === 0;
   }
 
   function ready() {
@@ -78,12 +88,14 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
   function installDeps() {
     return new Promise((resolve) => {
       state.deps = "installing";
-      logger.log("[face] installing face-recognition dependencies (one-time)…");
+      logger.log(`[face] installing dependencies (one-time) in ${moduleDir} …`);
+      let output = "";
       const child = spawn("npm", ["install", "--no-audit", "--no-fund", "--omit=dev"], {
         cwd: moduleDir,
-        stdio: "ignore",
         shell: true
       });
+      if (child.stdout) child.stdout.on("data", (chunk) => { output += chunk; });
+      if (child.stderr) child.stderr.on("data", (chunk) => { output += chunk; });
       child.on("error", (error) => {
         state.deps = "error";
         state.error = `Could not auto-install face packages (${error.message}). Run 'npm install' inside face_recognition once.`;
@@ -91,14 +103,16 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
         resolve(false);
       });
       child.on("close", (code) => {
-        if (code === 0 && depsInstalled()) {
+        const missing = missingDeps();
+        if (code === 0 && missing.length === 0) {
           state.deps = "ready";
           logger.log("[face] dependencies installed.");
           resolve(true);
         } else {
           state.deps = "error";
-          state.error = `npm install exited with code ${code}. Run 'npm install' inside face_recognition once.`;
+          state.error = `npm install exited with code ${code}; still missing: ${missing.join(", ") || "none"}`;
           logger.error(`[face] ${state.error}`);
+          logger.error(`[face] npm output (tail):\n${output.slice(-3000)}`);
           resolve(false);
         }
       });
@@ -112,6 +126,7 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
       state.models = "ready";
       return Promise.resolve(true);
     }
+    logger.log(`[face] not ready yet; missing: ${missingDeps().join(", ") || "none"}`);
     if (running) return running;
     if (Date.now() < cooldownUntil) return Promise.resolve(false);
 
