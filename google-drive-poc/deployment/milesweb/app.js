@@ -145,6 +145,7 @@ async function openGallery() {
   applyPermissions();
   renderSyncNotice();
   renderScenes();
+  await loadFavorites();
   await resetGrid();
   observeSentinel();
 }
@@ -354,6 +355,7 @@ function toggleFavorite(imageId) {
   else state.favorites.add(imageId);
 
   writeFavorites([...state.favorites]);
+  scheduleFavoritesSync();
   elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
   if (elements.lightbox.open) renderLightbox();
 }
@@ -501,6 +503,39 @@ function favoriteStorageKey() {
   return `starz-shots:favorites:${gallerySlug}:${state.role}:${state.viewerId}`;
 }
 
+// Server is the source of truth so favorites follow the viewer across devices; localStorage is an offline cache.
+async function loadFavorites() {
+  try {
+    const payload = await (await apiFetch("/favorites")).json();
+    state.favorites = new Set(Array.isArray(payload.ids) ? payload.ids : []);
+    writeFavorites([...state.favorites]);
+  } catch {
+    state.favorites = new Set(readFavorites());
+  }
+  elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
+}
+
+let favoritesSyncTimer = null;
+
+function scheduleFavoritesSync() {
+  if (favoritesSyncTimer) clearTimeout(favoritesSyncTimer);
+  favoritesSyncTimer = setTimeout(syncFavoritesToServer, 500);
+}
+
+async function syncFavoritesToServer() {
+  favoritesSyncTimer = null;
+  try {
+    await apiFetch("/favorites", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...state.favorites] }),
+      keepalive: true
+    });
+  } catch {
+    // Still cached locally; the next toggle (or reload) will retry the sync.
+  }
+}
+
 function formatDate(dateValue) {
   if (!dateValue) return "";
   const parsed = new Date(dateValue);
@@ -543,6 +578,14 @@ function bindUiEvents() {
   elements.lightboxFavorite.addEventListener("click", () => {
     const image = state.images[state.lightboxIndex];
     if (image) toggleFavorite(image.id);
+  });
+
+  // Flush a pending favorites save if the viewer leaves before the debounce fires.
+  window.addEventListener("pagehide", () => {
+    if (favoritesSyncTimer) {
+      clearTimeout(favoritesSyncTimer);
+      syncFavoritesToServer();
+    }
   });
 }
 
