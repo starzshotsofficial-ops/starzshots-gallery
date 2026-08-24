@@ -127,6 +127,8 @@ async function openGallery() {
 
   elements.accessView.classList.add("hidden");
   elements.galleryView.classList.remove("hidden");
+  // The access form can leave the page scrolled down (e.g. mobile keyboard); jump to the gallery top.
+  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
 
   if (state.summary.coverImage) {
     elements.coverImage.src = state.summary.coverImage;
