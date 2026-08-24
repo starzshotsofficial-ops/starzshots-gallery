@@ -148,6 +148,17 @@ async function openGallery() {
   await loadFavorites();
   await resetGrid();
   observeSentinel();
+  scrollToGalleryTop();
+}
+
+// The access form can leave the page scrolled down (e.g. mobile keyboard); jump to the gallery's title card.
+// Runs after the grid has rendered (double rAF) so later layout/image loads can't undo the scroll.
+function scrollToGalleryTop() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      elements.galleryView.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+  });
 }
 
 function applyPermissions() {
