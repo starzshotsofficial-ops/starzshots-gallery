@@ -1,18 +1,16 @@
 /* Additions for the cached, paginated gallery. Loaded after styles.css. */
 
 .photo-tile {
-  /* Reserves layout space before the thumbnail arrives so infinite scroll never jumps. */
-  aspect-ratio: 4 / 3;
+  /* Masonry column item: keep each photo's natural portrait/landscape shape. */
   background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
   content-visibility: auto;
-  contain-intrinsic-size: 240px 180px;
 }
 
 .photo-tile img {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  display: block;
   background: rgba(255, 255, 255, 0.04);
 }
 

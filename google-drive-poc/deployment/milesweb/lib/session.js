@@ -32,7 +32,7 @@ function createSessionManager({ secret, ttlHours, basePath, secureCookies }) {
     return session && session.slug === slug ? session : null;
   }
 
-  function cookieHeader(payload) {
+  function cookieHeader(payload, options = {}) {
     const attributes = [
       `${COOKIE_NAME}=${issue(payload)}`,
       `Path=${basePath || "/"}`,
@@ -40,7 +40,9 @@ function createSessionManager({ secret, ttlHours, basePath, secureCookies }) {
       "SameSite=Lax",
       `Max-Age=${Math.floor(ttlMs / 1000)}`
     ];
-    if (secureCookies) attributes.push("Secure");
+    // Browsers drop a Secure cookie sent over plain HTTP, so match the flag to the actual request.
+    const secure = typeof options.secure === "boolean" ? options.secure : secureCookies;
+    if (secure) attributes.push("Secure");
     return attributes.join("; ");
   }
 
