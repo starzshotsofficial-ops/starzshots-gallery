@@ -73,7 +73,7 @@ function createFaceEngine({
   function detectorOptions() {
     return detector === "ssd"
       ? new faceapi.SsdMobilenetv1Options({ minConfidence })
-      : new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: minConfidence });
+      : new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: minConfidence });
   }
 
   /** Decodes a JPEG buffer into an int32 [height, width, 3] RGB tensor. Caller must dispose. */

@@ -343,6 +343,7 @@ async function handleDeleteEvent(response, slug) {
   if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
   config.remove(slug);
   await cache.remove(slug);
+  await face.removeIndex(slug);
   return sendJson(response, 200, { ok: true });
 }
 

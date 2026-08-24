@@ -170,7 +170,9 @@ function createFaceRecognition({
       });
       return index.status(slug);
     },
-    indexStatus: (slug) => index.status(slug)
+    indexStatus: (slug) => index.status(slug),
+    // Removes a gallery's whole face index (index.json + high-res src cache); call on event delete.
+    removeIndex: (slug) => index.remove(slug)
   };
 }
 
