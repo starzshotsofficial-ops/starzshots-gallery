@@ -127,8 +127,6 @@ async function openGallery() {
 
   elements.accessView.classList.add("hidden");
   elements.galleryView.classList.remove("hidden");
-  // The access form can leave the page scrolled down (e.g. mobile keyboard); jump to the gallery top.
-  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
 
   if (state.summary.coverImage) {
     elements.coverImage.src = state.summary.coverImage;
@@ -145,6 +143,17 @@ async function openGallery() {
   await loadFavorites();
   await resetGrid();
   observeSentinel();
+  scrollToGalleryTop();
+}
+
+// The access form can leave the page scrolled down (e.g. mobile keyboard); jump to the gallery's title card.
+// Runs after the grid has rendered (double rAF) so later layout/image loads can't undo the scroll.
+function scrollToGalleryTop() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      elements.galleryView.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+  });
 }
 
 function applyPermissions() {
