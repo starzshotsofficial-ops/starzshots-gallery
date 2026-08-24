@@ -45,9 +45,7 @@
         <div class="scene-tabs" id="sceneTabs"></div>
         <div class="actions">
           <button type="button" id="showAll" class="tab active">All</button>
-          <button type="button" id="showFavorites" class="tab">Favorites</button>
-          <span id="favoriteCount" class="role-badge">0</span>
-          <button type="button" id="downloadAll" class="icon-button">Download all</button>
+          <button type="button" id="showFavorites" class="tab">Favorites (0)</button>
           <button type="button" id="downloadFavoritesCsv" class="icon-button">Download favorites</button>
           <a id="findMyPhotos" class="icon-button" href="#">Find my photos</a>
         </div>
@@ -74,15 +72,6 @@
         <a id="lightboxDownload" class="download-button" target="_blank" rel="noopener" download>Download</a>
       </div>
     </footer>
-  </dialog>
-
-  <dialog id="downloadDialog" class="download-dialog">
-    <h2>Download all photos</h2>
-    <p class="muted">Large galleries are split into parts so each download stays reliable. Start one part at a time.</p>
-    <div id="downloadParts" class="download-parts"></div>
-    <div class="dialog-actions">
-      <button id="closeDownloadDialog" type="button">Close</button>
-    </div>
   </dialog>
 
   <script src="app.js"></script>

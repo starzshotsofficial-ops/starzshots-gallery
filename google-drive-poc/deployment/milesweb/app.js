@@ -44,11 +44,9 @@ const elements = {
   syncNotice: document.querySelector("#syncNotice"),
   showAll: document.querySelector("#showAll"),
   showFavorites: document.querySelector("#showFavorites"),
-  downloadAll: document.querySelector("#downloadAll"),
   downloadFavoritesCsv: document.querySelector("#downloadFavoritesCsv"),
   findMyPhotos: document.querySelector("#findMyPhotos"),
   visitorRole: document.querySelector("#visitorRole"),
-  favoriteCount: document.querySelector("#favoriteCount"),
   lightbox: document.querySelector("#lightbox"),
   lightboxImage: document.querySelector("#lightboxImage"),
   lightboxScene: document.querySelector("#lightboxScene"),
@@ -57,10 +55,7 @@ const elements = {
   lightboxDownload: document.querySelector("#lightboxDownload"),
   closeLightbox: document.querySelector("#closeLightbox"),
   previousImage: document.querySelector("#previousImage"),
-  nextImage: document.querySelector("#nextImage"),
-  downloadDialog: document.querySelector("#downloadDialog"),
-  downloadParts: document.querySelector("#downloadParts"),
-  closeDownloadDialog: document.querySelector("#closeDownloadDialog")
+  nextImage: document.querySelector("#nextImage")
 };
 
 function resolveBasePath() {
@@ -163,7 +158,6 @@ function scrollToGalleryTop() {
 
 function applyPermissions() {
   elements.showFavorites.classList.toggle("hidden", !state.permissions.canFavorite);
-  elements.downloadAll.classList.toggle("hidden", !state.permissions.canDownloadAll);
   elements.downloadFavoritesCsv.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxFavorite.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
@@ -191,7 +185,7 @@ function renderScenes() {
 
       button.type = "button";
       button.className = `tab ${state.scene === scene.name ? "active" : ""}`;
-      label.textContent = scene.name === "all" ? "All Scenes" : scene.name;
+      label.textContent = scene.name === "all" ? "All" : scene.name;
       count.className = "tab-count";
       count.textContent = String(scene.count);
       count.title = `${scene.count} photos`;
@@ -217,7 +211,7 @@ async function resetGrid() {
   elements.galleryGrid.replaceChildren();
   elements.showAll.classList.toggle("active", !state.favoritesOnly);
   elements.showFavorites.classList.toggle("active", state.favoritesOnly);
-  elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
+  updateFavoriteCount();
   await loadNextPage();
 }
 
@@ -367,8 +361,12 @@ function toggleFavorite(imageId) {
 
   writeFavorites([...state.favorites]);
   scheduleFavoritesSync();
-  elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
+  updateFavoriteCount();
   if (elements.lightbox.open) renderLightbox();
+}
+
+function updateFavoriteCount() {
+  elements.showFavorites.textContent = `Favorites (${state.favorites.size})`;
 }
 
 function openLightbox(index) {
@@ -429,45 +427,6 @@ async function deleteImage(image, tile) {
   }
 }
 
-async function openDownloadDialog() {
-  if (!state.permissions.canDownloadAll) return;
-
-  elements.downloadParts.replaceChildren();
-  elements.downloadDialog.showModal();
-
-  try {
-    const payload = await (await apiFetch("/download-parts")).json();
-
-    if (!payload.parts.length) {
-      elements.downloadParts.textContent = "No photos are available for download yet.";
-      return;
-    }
-
-    elements.downloadParts.replaceChildren(
-      ...payload.parts.map((part) => {
-        const row = document.createElement("div");
-        row.className = "download-part";
-
-        const label = document.createElement("span");
-        label.textContent =
-          payload.parts.length > 1
-            ? `Part ${part.part} — ${part.imageCount} photos (${formatBytes(part.approximateBytes)})`
-            : `${part.imageCount} photos (${formatBytes(part.approximateBytes)})`;
-
-        const link = document.createElement("a");
-        link.className = "download-button";
-        link.href = part.url;
-        link.textContent = "Download";
-
-        row.append(label, link);
-        return row;
-      })
-    );
-  } catch (error) {
-    elements.downloadParts.textContent = error.message || "Download list could not be loaded.";
-  }
-}
-
 async function downloadFavoritesCsv() {
   if (!state.permissions.canFavorite) return;
 
@@ -523,7 +482,7 @@ async function loadFavorites() {
   } catch {
     state.favorites = new Set(readFavorites());
   }
-  elements.favoriteCount.textContent = `${state.favorites.size} favorites`;
+  updateFavoriteCount();
 }
 
 let favoritesSyncTimer = null;
@@ -554,18 +513,6 @@ function formatDate(dateValue) {
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "long", year: "numeric" }).format(parsed);
 }
 
-function formatBytes(bytes) {
-  if (!bytes) return "size unknown";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
 function bindUiEvents() {
   elements.accessForm.addEventListener("submit", handleAccessFormSubmit);
 
@@ -579,9 +526,7 @@ function bindUiEvents() {
     await resetGrid();
   });
 
-  elements.downloadAll.addEventListener("click", openDownloadDialog);
   elements.downloadFavoritesCsv.addEventListener("click", downloadFavoritesCsv);
-  elements.closeDownloadDialog.addEventListener("click", () => elements.downloadDialog.close());
 
   elements.closeLightbox.addEventListener("click", () => elements.lightbox.close());
   elements.previousImage.addEventListener("click", () => moveLightbox(-1));

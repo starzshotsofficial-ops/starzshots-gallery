@@ -557,9 +557,42 @@ dialog footer {
   background: var(--paper);
 }
 
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 15rem;
+}
+
+.row-action-button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.32rem 0.55rem;
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.row-action-button:hover {
+  border-color: var(--sage);
+  background: var(--panel);
+}
+
+.row-action-button.danger {
+  border-color: transparent;
+  color: #fff;
+  background: rgba(179, 38, 30, 0.9);
+}
+
+.row-action-button.danger:hover {
+  background: #8b241a;
+}
+
 .row-status {
-  display: inline-block;
-  margin-left: 0.6rem;
+  display: block;
+  margin: 0.35rem 0 0;
   font-size: 0.85rem;
   font-weight: 700;
 }
