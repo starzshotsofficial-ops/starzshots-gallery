@@ -172,7 +172,10 @@ async function handleAccess(request, response, gallery) {
   }
 
   const permissions = access.permissions || { canFavorite: true, canDownloadSingle: true, canDownloadAll: false };
-  const cookie = sessions.cookieHeader({ slug: gallery.slug, role: access.role, viewerId, permissions });
+  const cookie = sessions.cookieHeader(
+    { slug: gallery.slug, role: access.role, viewerId, permissions },
+    { secure: isSecureRequest(request) }
+  );
 
   return sendJson(response, 200, { role: access.role, viewerId, label: access.label, permissions }, { "Set-Cookie": cookie });
 }
@@ -546,6 +549,12 @@ async function handleBrowseFolders(request, response) {
 }
 
 // ---------------------------------------------------------------------------
+
+function isSecureRequest(request) {
+  const forwardedProto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+  return request.socket?.encrypted === true;
+}
 
 function normalizeBasePath(value) {
   const trimmed = String(value || "").trim().replace(/\/+$/, "");
