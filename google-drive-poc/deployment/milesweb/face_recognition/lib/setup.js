@@ -24,7 +24,8 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
 
   function depsInstalled() {
     try {
-      require.resolve("@vladmandic/human");
+      require.resolve("@vladmandic/human/dist/human.node-wasm.js");
+      require.resolve("@tensorflow/tfjs-backend-wasm");
       require.resolve("jpeg-js");
       return true;
     } catch {

@@ -12,6 +12,7 @@
  * distance (1 - dot); lower = more similar.
  */
 
+const path = require("path");
 const { parentPort, workerData } = require("worker_threads");
 
 const { modelBasePath, wasmPath, maxDetected, minFaceSize, minScore } = workerData;
@@ -21,10 +22,20 @@ let jpeg = null;
 let human = null;
 let loadPromise = null;
 
+// Load the WASM binaries from the locally installed backend so their version matches
+// the tfjs Human uses; fall back to whatever wasmPath was configured (e.g. a CDN).
+function resolveWasmPath() {
+  try {
+    return path.join(path.dirname(require.resolve("@tensorflow/tfjs-backend-wasm/package.json")), "dist") + path.sep;
+  } catch {
+    return wasmPath;
+  }
+}
+
 function humanConfig() {
   return {
     backend: "wasm",
-    wasmPath,
+    wasmPath: resolveWasmPath(),
     modelBasePath,
     cacheSensitivity: 0,
     debug: false,
@@ -49,8 +60,10 @@ function humanConfig() {
 function ensureLoaded() {
   if (!loadPromise) {
     loadPromise = (async () => {
-      const mod = require("@vladmandic/human");
-      Human = mod.default || mod.Human;
+      // The package default (dist/human.node.js) needs the NATIVE @tensorflow/tfjs-node,
+      // which cannot be installed on shared hosting. node-wasm.js is the pure-JS/WASM build.
+      const mod = require("@vladmandic/human/dist/human.node-wasm.js");
+      Human = mod.default || mod.Human || mod;
       jpeg = require("jpeg-js");
       human = new Human(humanConfig());
       await human.load();
