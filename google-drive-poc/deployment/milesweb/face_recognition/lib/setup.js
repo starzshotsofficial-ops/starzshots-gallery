@@ -24,7 +24,10 @@ function createSetup({ moduleDir, logger = console, autoInstall = true }) {
 
   function depsInstalled() {
     try {
-      require.resolve("@vladmandic/human/dist/human.node-wasm.js");
+      // Human's exports map blocks the /dist/ subpath, so check the file directly.
+      const humanDir = path.dirname(require.resolve("@vladmandic/human/package.json"));
+      if (!fs.existsSync(path.join(humanDir, "dist", "human.node-wasm.js"))) return false;
+      require.resolve("@tensorflow/tfjs");
       require.resolve("@tensorflow/tfjs-backend-wasm");
       require.resolve("jpeg-js");
       return true;

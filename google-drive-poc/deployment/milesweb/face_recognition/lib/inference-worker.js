@@ -57,12 +57,17 @@ function humanConfig() {
   };
 }
 
+// Human's package.json "exports" map blocks the /dist/ subpath, so load the pure-JS
+// node-wasm build by absolute path (package.json is always resolvable) to bypass it.
+function humanWasmEntry() {
+  const humanDir = path.dirname(require.resolve("@vladmandic/human/package.json"));
+  return path.join(humanDir, "dist", "human.node-wasm.js");
+}
+
 function ensureLoaded() {
   if (!loadPromise) {
     loadPromise = (async () => {
-      // The package default (dist/human.node.js) needs the NATIVE @tensorflow/tfjs-node,
-      // which cannot be installed on shared hosting. node-wasm.js is the pure-JS/WASM build.
-      const mod = require("@vladmandic/human/dist/human.node-wasm.js");
+      const mod = require(humanWasmEntry());
       Human = mod.default || mod.Human || mod;
       jpeg = require("jpeg-js");
       human = new Human(humanConfig());
