@@ -88,9 +88,32 @@ function faceSize(face) {
   return Math.min(box[2], box[3]);
 }
 
+// Human returns embedding as a Float32Array (not a plain Array), so test length, not Array.isArray.
+function hasEmbedding(face) {
+  return face.embedding && face.embedding.length > 0;
+}
+
+function faceScoreOf(face) {
+  // Default to 1 when a score field is absent so a naming difference never drops every face.
+  return face.faceScore ?? face.boxScore ?? face.score ?? 1;
+}
+
 function usableFace(face) {
-  const score = face.faceScore ?? face.score ?? face.boxScore ?? 0;
-  return Array.isArray(face.embedding) && faceSize(face) >= minFaceSize && score >= minScore;
+  return hasEmbedding(face) && faceSize(face) >= minFaceSize && faceScoreOf(face) >= minScore;
+}
+
+let diagnosed = false;
+function diagnoseOnce(result) {
+  if (diagnosed) return;
+  diagnosed = true;
+  const faces = result.face || [];
+  const first = faces[0];
+  console.log(
+    `[face] worker diagnostic: detected=${faces.length}` +
+      (first
+        ? ` firstEmbeddingLen=${first.embedding ? first.embedding.length : 0} firstBox=${JSON.stringify(first.box)} faceScore=${first.faceScore} boxScore=${first.boxScore}`
+        : "")
+  );
 }
 
 async function describeAll(buffer) {
@@ -98,6 +121,7 @@ async function describeAll(buffer) {
   const tensor = decodeToTensor(buffer);
   try {
     const result = await human.detect(tensor);
+    diagnoseOnce(result);
     return (result.face || []).filter(usableFace).map((face) => l2normalize(Array.from(face.embedding)));
   } finally {
     human.tf.dispose(tensor);
@@ -109,7 +133,7 @@ async function describeLargest(buffer) {
   const tensor = decodeToTensor(buffer);
   try {
     const result = await human.detect(tensor);
-    const faces = (result.face || []).filter((face) => Array.isArray(face.embedding));
+    const faces = (result.face || []).filter(hasEmbedding);
     if (!faces.length) return null;
     const largest = faces.reduce((best, face) => (faceSize(face) > faceSize(best) ? face : best));
     return l2normalize(Array.from(largest.embedding));
