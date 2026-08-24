@@ -64,6 +64,7 @@ const face = createFaceRecognition({
   config,
   dataDir,
   basePath,
+  port,
   thumbnailSize,
   sendJson,
   readJsonBody,
@@ -112,6 +113,10 @@ async function route(request, response) {
 
   if (request.method === "GET" && (pathname === "/find-my-photos" || pathname.startsWith("/find-my-photos/"))) {
     return face.handlePage(request, response, url);
+  }
+
+  if (request.method === "GET" && segments[0] === "face-models") {
+    return face.handleModelFile(response, decodeURIComponent(segments[1] || ""));
   }
 
   if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed." });

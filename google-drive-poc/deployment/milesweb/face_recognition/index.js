@@ -26,6 +26,7 @@ function createFaceRecognition({
   config,
   dataDir,
   basePath,
+  port,
   thumbnailSize,
   sendJson,
   readJsonBody,
@@ -35,10 +36,12 @@ function createFaceRecognition({
 }) {
   const publicDir = path.join(__dirname, "public");
   const modelsDir = path.join(__dirname, "models");
+  const modelFiles = new Set(["blazeface.json", "blazeface.bin", "facemesh.json", "facemesh.bin", "faceres.json", "faceres.bin"]);
 
   const engine = createFaceEngine({
-    // Loaded from local disk (downloaded once by setup) so runtime never depends on the CDN.
-    modelBasePath: options.modelBasePath || `file://${modelsDir}${path.sep}`,
+    // Node's fetch (undici) does not support file:// URLs, so models are served over our
+    // own loopback HTTP endpoint instead of read directly off disk or from a public CDN.
+    modelBasePath: options.modelBasePath || `http://127.0.0.1:${port}${basePath}/face-models/`,
     wasmPath: options.wasmPath,
     matchThreshold: options.matchThreshold ?? 0.4,
     minFaceSize: options.minFaceSize ?? 34,
@@ -89,6 +92,18 @@ function createFaceRecognition({
     if (!fs.existsSync(file)) return sendJson(response, 404, { error: "Not found." });
 
     response.writeHead(200, { "Content-Type": asset[1], "Cache-Control": "no-cache", ...SECURITY_HEADERS });
+    return fs.createReadStream(file).pipe(response);
+  }
+
+  /** Serves a downloaded Human model file to the inference worker's fetch() call. */
+  function handleModelFile(response, filename) {
+    if (!modelFiles.has(filename)) return sendJson(response, 404, { error: "Not found." });
+
+    const file = path.join(modelsDir, filename);
+    if (!fs.existsSync(file)) return sendJson(response, 404, { error: "Not found." });
+
+    const contentType = filename.endsWith(".json") ? "application/json" : "application/octet-stream";
+    response.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-cache", ...SECURITY_HEADERS });
     return fs.createReadStream(file).pipe(response);
   }
 
@@ -162,6 +177,7 @@ function createFaceRecognition({
 
   return {
     handlePage,
+    handleModelFile,
     handleGallery,
     onSyncComplete,
     indexAllReady,
