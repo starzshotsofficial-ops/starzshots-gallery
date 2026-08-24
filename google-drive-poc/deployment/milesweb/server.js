@@ -455,6 +455,14 @@ async function routeAdmin(request, response, segments, url) {
     if (request.method === "GET") return sendJson(response, 200, { sync: sync.status(slug) });
   }
 
+  if (segments[0] === "events" && segments[1] && segments[2] === "face-index") {
+    const slug = decodeURIComponent(segments[1]);
+    if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
+
+    if (request.method === "POST") return sendJson(response, 202, { ok: true, faceIndex: face.rebuildIndex(slug) });
+    if (request.method === "GET") return sendJson(response, 200, { faceIndex: face.indexStatus(slug) });
+  }
+
   if (request.method === "PUT" && segments[0] === "events" && segments[1] && !segments[2]) {
     return handleUpdateEvent(request, response, decodeURIComponent(segments[1]));
   }

@@ -28,13 +28,19 @@ const SSD_FILES = [
 ];
 
 function modelsInstalled(modelsDir) {
+  // Must verify the .bin weights, not just the manifests: a partial download (manifests only,
+  // as happened during the -shard1 404 bug) would otherwise look "installed" forever.
   const required = [
     "face_recognition_model-weights_manifest.json",
-    "face_landmark_68_model-weights_manifest.json"
+    "face_recognition_model.bin",
+    "face_landmark_68_model-weights_manifest.json",
+    "face_landmark_68_model.bin"
   ];
   const detector =
-    fs.existsSync(path.join(modelsDir, "tiny_face_detector_model-weights_manifest.json")) ||
-    fs.existsSync(path.join(modelsDir, "ssd_mobilenetv1_model-weights_manifest.json"));
+    (fs.existsSync(path.join(modelsDir, "tiny_face_detector_model-weights_manifest.json")) &&
+      fs.existsSync(path.join(modelsDir, "tiny_face_detector_model.bin"))) ||
+    (fs.existsSync(path.join(modelsDir, "ssd_mobilenetv1_model-weights_manifest.json")) &&
+      fs.existsSync(path.join(modelsDir, "ssd_mobilenetv1_model.bin")));
   return detector && required.every((file) => fs.existsSync(path.join(modelsDir, file)));
 }
 

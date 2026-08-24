@@ -103,6 +103,11 @@ function createEventRow(event) {
   syncButton.className = "icon-button";
   syncButton.textContent = "Rebuild cache";
 
+  const faceIndexButton = document.createElement("button");
+  faceIndexButton.type = "button";
+  faceIndexButton.className = "icon-button";
+  faceIndexButton.textContent = "Rebuild face index";
+
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
   deleteButton.className = "icon-button danger";
@@ -167,6 +172,25 @@ function createEventRow(event) {
     }
   });
 
+  faceIndexButton.addEventListener("click", async () => {
+    status.textContent = "";
+    status.classList.remove("error", "success");
+
+    try {
+      const response = await adminFetch(`/events/${encodeURIComponent(event.slug)}/face-index`, { method: "POST" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Unable to start the face index rebuild.");
+      }
+
+      status.textContent = "Face index rebuild queued.";
+      status.classList.add("success");
+    } catch (error) {
+      status.textContent = error.message || "Unable to start the face index rebuild.";
+      status.classList.add("error");
+    }
+  });
+
   deleteButton.addEventListener("click", async () => {
     status.textContent = "";
     status.classList.remove("error", "success");
@@ -186,7 +210,7 @@ function createEventRow(event) {
     }
   });
 
-  actionsCell.append(saveButton, syncButton, deleteButton, status);
+  actionsCell.append(saveButton, syncButton, faceIndexButton, deleteButton, status);
   row.append(actionsCell);
   return row;
 }

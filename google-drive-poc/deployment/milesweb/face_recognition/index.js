@@ -156,7 +156,21 @@ function createFaceRecognition({
     };
   }
 
-  return { handlePage, handleGallery, onSyncComplete, indexAllReady, ready: setup.ready };
+  return {
+    handlePage,
+    handleGallery,
+    onSyncComplete,
+    indexAllReady,
+    ready: setup.ready,
+    // For the admin "Rebuild face index" button; bypasses the isStale() freshness check.
+    rebuildIndex: (slug) => {
+      setup.ensureReady().then((ok) => {
+        if (ok) index.enqueueBuild(slug, { force: true });
+      });
+      return index.status(slug);
+    },
+    indexStatus: (slug) => index.status(slug)
+  };
 }
 
 function decodeSelfie(value) {
