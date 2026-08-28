@@ -17,6 +17,7 @@ const { createSyncWorker } = require("./lib/sync-worker");
 const { createSessionManager, timingSafeEqual } = require("./lib/session");
 const { ZipWriter } = require("./lib/zip-writer");
 const { sendJson, serveStatic, readJsonBody, SECURITY_HEADERS } = require("./lib/http-utils");
+const { createFaceRecognition } = require("./face_recognition");
 
 const rootDir = __dirname;
 const env = { ...loadEnvFile(path.join(rootDir, ".env")), ...process.env };
@@ -47,13 +48,38 @@ const sync = createSyncWorker({
   drive,
   thumbnailSize,
   concurrency: readNumber(env, "SYNC_CONCURRENCY", 4),
-  refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360)
+  refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360),
+  onGalleryReady: (slug) => face.onSyncComplete(slug)
 });
 const sessions = createSessionManager({
   secret: resolveSessionSecret(),
   ttlHours: readNumber(env, "SESSION_TTL_HOURS", 12),
   basePath,
   secureCookies: readBoolean(env, "SECURE_COOKIES", true)
+});
+
+const face = createFaceRecognition({
+  cache,
+  drive,
+  config,
+  dataDir,
+  basePath,
+  port,
+  thumbnailSize,
+  sendJson,
+  readJsonBody,
+  SECURITY_HEADERS,
+  options: {
+    matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.4")) || 0.4,
+    faceImageSize: readNumber(env, "FACE_IMAGE_SIZE", 2048),
+    minFaceSize: readNumber(env, "FACE_MIN_FACE_SIZE", 34),
+    minScore: Number(readString(env, "FACE_MIN_SCORE", "0.4")) || 0.4,
+    maxDetected: readNumber(env, "FACE_MAX_DETECTED", 100),
+    // Empty by default: index.js points these at the locally downloaded models/wasm files.
+    // Only set FACE_MODEL_BASE_PATH / FACE_WASM_PATH to force a CDN instead.
+    modelBasePath: readString(env, "FACE_MODEL_BASE_PATH", ""),
+    wasmPath: readString(env, "FACE_WASM_PATH", "")
+  }
 });
 
 const server = http.createServer(async (request, response) => {
@@ -83,6 +109,14 @@ async function route(request, response) {
     if (segments[1] === "admin") return routeAdmin(request, response, segments.slice(2), url);
     if (segments[1] === "galleries") return routeGallery(request, response, segments.slice(2), url);
     return sendJson(response, 404, { error: "Not found." });
+  }
+
+  if (request.method === "GET" && (pathname === "/find-my-photos" || pathname.startsWith("/find-my-photos/"))) {
+    return face.handlePage(request, response, url);
+  }
+
+  if (request.method === "GET" && segments[0] === "face-models") {
+    return face.handleModelFile(response, decodeURIComponent(segments[1] || ""));
   }
 
   if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed." });
@@ -115,6 +149,8 @@ async function routeGallery(request, response, segments, url) {
 
   const session = sessions.read(request, slug);
   if (!session) return sendJson(response, 401, { error: "Enter your access code to view this gallery." });
+
+  if (action === "face") return face.handleGallery(request, response, gallery, session, segments.slice(2), url);
 
   if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
   if (request.method === "GET" && action === "images") return handleImages(response, gallery, url);
@@ -319,6 +355,7 @@ async function handleDeleteEvent(response, slug) {
   if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
   config.remove(slug);
   await cache.remove(slug);
+  await face.removeIndex(slug);
   return sendJson(response, 200, { ok: true });
 }
 
@@ -429,6 +466,14 @@ async function routeAdmin(request, response, segments, url) {
       return sendJson(response, 202, { ok: true, sync: sync.status(slug) });
     }
     if (request.method === "GET") return sendJson(response, 200, { sync: sync.status(slug) });
+  }
+
+  if (segments[0] === "events" && segments[1] && segments[2] === "face-index") {
+    const slug = decodeURIComponent(segments[1]);
+    if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
+
+    if (request.method === "POST") return sendJson(response, 202, { ok: true, faceIndex: face.rebuildIndex(slug) });
+    if (request.method === "GET") return sendJson(response, 200, { faceIndex: face.indexStatus(slug) });
   }
 
   if (request.method === "PUT" && segments[0] === "events" && segments[1] && !segments[2]) {

@@ -84,7 +84,6 @@ function createEventRow(event) {
     clientName: createCell("text", event.clientName),
     googleDriveFolderName: createCell("text", event.googleDriveFolderName),
     sceneFolderNames: createCell("text", (event.sceneFolderNames || []).join(", ")),
-    coverImage: createCell("text", event.coverImage),
     clientCode: createCell("text", event.clientCode),
     guestCode: createCell("text", event.guestCode)
   };
@@ -93,19 +92,27 @@ function createEventRow(event) {
   row.append(createSyncCell(event));
 
   const actionsCell = document.createElement("td");
+  const actionsRow = document.createElement("div");
+  actionsRow.className = "row-actions";
+
   const saveButton = document.createElement("button");
   saveButton.type = "button";
-  saveButton.className = "icon-button";
+  saveButton.className = "row-action-button";
   saveButton.textContent = "Save";
 
   const syncButton = document.createElement("button");
   syncButton.type = "button";
-  syncButton.className = "icon-button";
+  syncButton.className = "row-action-button";
   syncButton.textContent = "Rebuild cache";
+
+  const faceIndexButton = document.createElement("button");
+  faceIndexButton.type = "button";
+  faceIndexButton.className = "row-action-button";
+  faceIndexButton.textContent = "Rebuild face index";
 
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
-  deleteButton.className = "icon-button danger";
+  deleteButton.className = "row-action-button danger";
   deleteButton.textContent = "Delete event";
 
   const status = document.createElement("span");
@@ -121,7 +128,6 @@ function createEventRow(event) {
       clientName: fields.clientName.input.value.trim(),
       googleDriveFolderName: fields.googleDriveFolderName.input.value.trim(),
       sceneFolderNames: fields.sceneFolderNames.input.value.split(",").map((name) => name.trim()).filter(Boolean),
-      coverImage: fields.coverImage.input.value.trim(),
       clientCode: fields.clientCode.input.value.trim(),
       guestCode: fields.guestCode.input.value.trim()
     };
@@ -167,6 +173,25 @@ function createEventRow(event) {
     }
   });
 
+  faceIndexButton.addEventListener("click", async () => {
+    status.textContent = "";
+    status.classList.remove("error", "success");
+
+    try {
+      const response = await adminFetch(`/events/${encodeURIComponent(event.slug)}/face-index`, { method: "POST" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Unable to start the face index rebuild.");
+      }
+
+      status.textContent = "Face index rebuild queued.";
+      status.classList.add("success");
+    } catch (error) {
+      status.textContent = error.message || "Unable to start the face index rebuild.";
+      status.classList.add("error");
+    }
+  });
+
   deleteButton.addEventListener("click", async () => {
     status.textContent = "";
     status.classList.remove("error", "success");
@@ -186,7 +211,8 @@ function createEventRow(event) {
     }
   });
 
-  actionsCell.append(saveButton, syncButton, deleteButton, status);
+  actionsRow.append(saveButton, syncButton, faceIndexButton, deleteButton);
+  actionsCell.append(actionsRow, status);
   row.append(actionsCell);
   return row;
 }
@@ -270,7 +296,6 @@ async function handleCreateSubmit(event) {
     slug: String(form.get("slug") || "").trim(),
     googleDriveFolderName: String(form.get("googleDriveFolderName") || "").trim(),
     sceneFolderNames: String(form.get("sceneFolderNames") || "").split(",").map((name) => name.trim()).filter(Boolean),
-    coverImage: String(form.get("coverImage") || "").trim(),
     clientCode: String(form.get("clientCode") || "").trim(),
     guestCode: String(form.get("guestCode") || "").trim()
   };
@@ -287,7 +312,6 @@ async function handleCreateSubmit(event) {
 
     elements.createSuccess.textContent = `Created '${payload.event.eventName}'. The thumbnail cache job has been queued.`;
     elements.createForm.reset();
-    elements.createForm.sceneFolderNames.value = "T.Photo, C.Photo";
     elements.createForm.guestCode.value = "guest";
     void loadEvents();
   } catch (error) {

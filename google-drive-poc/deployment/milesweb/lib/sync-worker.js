@@ -17,7 +17,7 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
  * every photo into DATA_DIR. Runs one event at a time so a 2000-photo sync never
  * saturates a shared-hosting container.
  */
-function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, refreshMinutes, logger = console }) {
+function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, refreshMinutes, logger = console, onGalleryReady }) {
   const queue = [];
   const queued = new Set();
   const forceFlags = new Set();
@@ -150,6 +150,14 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
     });
 
     logger.log(`[sync] ${slug}: ${totalImages} photos indexed, ${cached - failed} thumbnails cached, ${failed} deferred.`);
+
+    if (typeof onGalleryReady === "function") {
+      try {
+        onGalleryReady(slug);
+      } catch (error) {
+        logger.warn(`[sync] ${slug}: onGalleryReady hook failed (${error.message}).`);
+      }
+    }
   }
 
   // Walks the event folder tree so nested sub-folders (Event > Album > Card 1 > ...) each become a scene automatically.
