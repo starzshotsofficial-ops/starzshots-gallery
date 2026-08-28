@@ -276,13 +276,23 @@ function renderLightbox() {
   const image = state.visibleImages[state.lightboxIndex];
   if (!image) return;
 
-  elements.lightboxImage.src = image.url;
+  elements.lightboxImage.src = image.thumbnailUrl || image.url;
   elements.lightboxImage.alt = image.filename;
   elements.lightboxScene.textContent = `${image.scene} #${image.sceneIndex}`;
   elements.lightboxFilename.textContent = image.filename;
   elements.lightboxFavorite.textContent = state.favorites.has(image.id) ? "Remove Favorite" : "Favorite";
   elements.lightboxDownload.href = image.downloadUrl || image.url;
   elements.lightboxDownload.setAttribute("download", image.filename);
+
+  if (image.url && image.url !== elements.lightboxImage.src) {
+    const fullImage = new Image();
+    fullImage.onload = () => {
+      if (state.visibleImages[state.lightboxIndex]?.id === image.id) {
+        elements.lightboxImage.src = image.url;
+      }
+    };
+    fullImage.src = image.url;
+  }
 }
 
 function moveLightbox(direction) {
