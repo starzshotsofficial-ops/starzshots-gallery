@@ -429,12 +429,16 @@ dialog footer {
   gap: 0.4rem;
 }
 
-.dialog-actions button,
-.dialog-actions .download-button {
+.dialog-actions > button,
+.dialog-actions > .download-button {
+  height: 2.1rem;
   min-height: 2.1rem;
   padding: 0.45rem 0.7rem;
   border-radius: 5px;
+  font-family: inherit;
+  font-weight: 800;
   font-size: 0.82rem;
+  line-height: 1;
 }
 
 #lightboxFavorite {
