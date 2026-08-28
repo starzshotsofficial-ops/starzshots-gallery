@@ -52,6 +52,7 @@ const elements = {
   lightboxScene: document.querySelector("#lightboxScene"),
   lightboxFilename: document.querySelector("#lightboxFilename"),
   lightboxFavorite: document.querySelector("#lightboxFavorite"),
+  lightboxRemove: document.querySelector("#lightboxRemove"),
   lightboxDownload: document.querySelector("#lightboxDownload"),
   closeLightbox: document.querySelector("#closeLightbox"),
   previousImage: document.querySelector("#previousImage"),
@@ -160,6 +161,7 @@ function applyPermissions() {
   elements.showFavorites.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.downloadFavoritesCsv.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxFavorite.classList.toggle("hidden", !state.permissions.canFavorite);
+  elements.lightboxRemove.classList.toggle("hidden", state.role !== "client");
   elements.lightboxDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
 }
 
@@ -379,13 +381,23 @@ function renderLightbox() {
   const image = state.images[state.lightboxIndex];
   if (!image) return;
 
-  elements.lightboxImage.src = image.url;
+  elements.lightboxImage.src = image.thumbnailUrl || image.url;
   elements.lightboxImage.alt = image.filename;
   elements.lightboxScene.textContent = `${image.scene} #${image.sceneIndex}`;
   elements.lightboxFilename.textContent = image.filename;
   elements.lightboxFavorite.textContent = state.favorites.has(image.id) ? "Remove Favorite" : "Favorite";
   elements.lightboxDownload.href = image.downloadUrl;
   elements.lightboxDownload.setAttribute("download", image.filename);
+
+  if (image.url && image.url !== elements.lightboxImage.src) {
+    const fullImage = new Image();
+    fullImage.onload = () => {
+      if (state.images[state.lightboxIndex]?.id === image.id) {
+        elements.lightboxImage.src = image.url;
+      }
+    };
+    fullImage.src = image.url;
+  }
 }
 
 async function moveLightbox(direction) {
@@ -419,7 +431,7 @@ async function deleteImage(image, tile) {
   }
 
   state.removed.add(image.id);
-  tile.remove();
+  tile?.remove();
   if (elements.lightbox.open) elements.lightbox.close();
 
   if (payload && payload.driveTrashed === false) {
@@ -534,6 +546,10 @@ function bindUiEvents() {
   elements.lightboxFavorite.addEventListener("click", () => {
     const image = state.images[state.lightboxIndex];
     if (image) toggleFavorite(image.id);
+  });
+  elements.lightboxRemove.addEventListener("click", () => {
+    const image = state.images[state.lightboxIndex];
+    if (image) removeImage(image);
   });
 
   // Flush a pending favorites save if the viewer leaves before the debounce fires.
