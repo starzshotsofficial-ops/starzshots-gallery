@@ -1,0 +1,25 @@
+{
+  "enabled": true,
+  "email": {
+    "enabled": true,
+    "service": "gmail",
+    "user": "starzshotsofficial@gmail.com",
+    "password": "your-gmail-app-password-here"
+  },
+  "sms": {
+    "enabled": true,
+    "provider": "twilio",
+    "accountSid": "your-twilio-account-sid",
+    "authToken": "your-twilio-auth-token",
+    "fromNumber": "+1234567890"
+  },
+  "whatsapp": {
+    "enabled": true,
+    "provider": "twilio",
+    "accountSid": "your-twilio-account-sid",
+    "authToken": "your-twilio-auth-token",
+    "fromNumber": "whatsapp:+1234567890"
+  },
+  "adminPhone": "+919962206330",
+  "adminEmail": "starzshotsofficial@gmail.com"
+}

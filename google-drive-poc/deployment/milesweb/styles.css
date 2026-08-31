@@ -324,6 +324,43 @@ button {
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
 }
 
+.tile-crown,
+.tile-hide {
+  position: absolute;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  color: #fff;
+  background: rgba(87, 107, 80, 0.9);
+  font-weight: 800;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.tile-crown {
+  left: 0.6rem;
+  bottom: 0.6rem;
+}
+
+.tile-hide {
+  right: 3.5rem;
+  bottom: 0.6rem;
+}
+
+.tile-crown.active,
+.tile-hide.active {
+  background: #f5a623;
+  color: var(--ink);
+}
+
+.tile-crown:hover,
+.tile-hide:hover {
+  background: #596b50;
+}
+
+.tile-crown.active:hover,
+.tile-hide.active:hover {
+  background: #e09a1f;
+}
+
 .tile-download,
 .download-button {
   border-radius: 6px;

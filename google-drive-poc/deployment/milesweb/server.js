@@ -13,11 +13,13 @@ const { createConfigStore, createAccessCodes, getAccessCode, setAccessCode, matc
 const { createDriveClient } = require("./lib/drive-client");
 const { createGalleryCache } = require("./lib/gallery-cache");
 const { createFavoritesStore } = require("./lib/favorites-store");
+const { createHiddenPhotosStore } = require("./lib/hidden-photos-store");
 const { createSyncWorker } = require("./lib/sync-worker");
 const { createSessionManager, timingSafeEqual } = require("./lib/session");
 const { ZipWriter } = require("./lib/zip-writer");
 const { sendJson, serveStatic, readJsonBody, SECURITY_HEADERS } = require("./lib/http-utils");
 const { createFaceRecognition } = require("./face_recognition");
+const { createNotificationService } = require("./lib/notifications");
 
 const rootDir = __dirname;
 const env = { ...loadEnvFile(path.join(rootDir, ".env")), ...process.env };
@@ -37,6 +39,8 @@ const maxPageSize = 120;
 const config = createConfigStore(path.join(rootDir, "config", "galleries.json"));
 const cache = createGalleryCache(dataDir);
 const favorites = createFavoritesStore(dataDir);
+const hidden = createHiddenPhotosStore(dataDir);
+const notifications = createNotificationService(path.join(rootDir, "config"));
 const drive = createDriveClient({
   env,
   allowInsecureTls: readBoolean(env, "GOOGLE_DRIVE_ALLOW_INSECURE_TLS", false),
@@ -153,10 +157,13 @@ async function routeGallery(request, response, segments, url) {
   if (action === "face") return face.handleGallery(request, response, gallery, session, segments.slice(2), url);
 
   if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
-  if (request.method === "GET" && action === "images") return handleImages(response, gallery, url);
+  if (request.method === "GET" && action === "images") return handleImages(response, gallery, url, session);
   if (request.method === "POST" && action === "images-by-id") return handleImagesById(request, response, gallery);
   if (request.method === "GET" && action === "favorites") return handleGetFavorites(response, gallery, session);
   if (request.method === "PUT" && action === "favorites") return handleSaveFavorites(request, response, gallery, session);
+  if (request.method === "GET" && action === "hidden") return handleGetHidden(response, gallery);
+  if (request.method === "PUT" && action === "hidden") return handleSaveHidden(request, response, gallery);
+  if (request.method === "PUT" && action === "cover-image" && segments[2]) return handleSetCoverImage(response, gallery, decodeURIComponent(segments[2]));
   if (request.method === "GET" && action === "thumbs") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "thumb");
   if (request.method === "GET" && action === "previews") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "preview");
 
@@ -219,17 +226,21 @@ function handleSummary(response, gallery, session) {
   });
 }
 
-function handleImages(response, gallery, url) {
+function handleImages(response, gallery, url, session) {
   const sceneName = url.searchParams.get("scene") || "all";
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0) | 0);
   const limit = Math.min(maxPageSize, Math.max(1, Number(url.searchParams.get("limit") || 60) | 0));
   const result = cache.page(gallery.slug, sceneName, offset, limit);
 
+  // Filter out hidden photos for guests (only clients can see all photos)
+  const hiddenIds = session?.role === "client" ? new Set() : new Set(hidden.read(gallery.slug));
+  const filteredImages = result.images.filter((image) => !hiddenIds.has(image.id));
+
   return sendJson(response, 200, {
-    total: result.total,
+    total: result.total - (session?.role !== "client" ? hiddenIds.size : 0),
     offset,
     limit,
-    images: result.images.map((image) => withUrls(gallery.slug, image))
+    images: filteredImages.map((image) => withUrls(gallery.slug, image))
   });
 }
 
@@ -252,6 +263,29 @@ async function handleSaveFavorites(request, response, gallery, session) {
   const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 5000) : [];
   const saved = await favorites.write(gallery.slug, session.role, session.viewerId, ids);
   return sendJson(response, 200, { ids: saved });
+}
+
+function handleGetHidden(response, gallery) {
+  const ids = hidden.read(gallery.slug);
+  return sendJson(response, 200, { ids });
+}
+
+async function handleSaveHidden(request, response, gallery) {
+  const body = await readJsonBody(request);
+  const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 5000) : [];
+  const saved = await hidden.write(gallery.slug, ids);
+  return sendJson(response, 200, { ids: saved });
+}
+
+function handleSetCoverImage(response, gallery, fileId) {
+  const located = cache.findImage(gallery.slug, fileId);
+  if (!located) return sendJson(response, 404, { error: "Photo not found in this gallery." });
+
+  // Update the gallery with the new cover image
+  gallery.coverImage = `${basePath}/api/galleries/${encodeURIComponent(gallery.slug)}/previews/${encodeURIComponent(fileId)}`;
+  config.save();
+
+  return sendJson(response, 200, { ok: true, coverImage: gallery.coverImage });
 }
 
 function withUrls(slug, image) {
@@ -550,6 +584,23 @@ async function handleCreateEvent(request, response) {
   });
 
   sync.enqueue(slug);
+
+  // Send notifications for event creation
+  const guestCode = getAccessCode(gallery, "guest");
+  const galleryUrl = `${String(body.baseUrl || "http://localhost:3001").trim()}/?event=${encodeURIComponent(slug)}`;
+  const googleDriveFolderUrl = String(body.googleDriveFolderUrl || "").trim() || "N/A";
+
+  notifications.notifyEventCreated({
+    eventName,
+    eventDate: gallery.eventDate,
+    clientCode,
+    guestCode,
+    galleryUrl,
+    googleDriveFolderUrl
+  }).catch((error) => {
+    console.error("Error sending event creation notifications:", error);
+  });
+
   return sendJson(response, 201, { ok: true, event: toAdminEvent(gallery) });
 }
 

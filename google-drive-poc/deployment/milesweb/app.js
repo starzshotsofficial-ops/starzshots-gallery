@@ -4,6 +4,8 @@ const pageSize = 60;
 
 const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 11 4 4 4-4"/><path d="M5 21h14"/></svg>`;
 const TRASH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>`;
+const CROWN_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 6h6l-5 4 2 6-6-4-6 4 2-6-5-4h6z"/></svg>`;
+const HIDE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><path d="M21 9.88M3 9.88"/></svg>`;
 
 const state = {
   meta: null,
@@ -12,6 +14,7 @@ const state = {
   favoritesOnly: false,
   favorites: new Set(),
   removed: new Set(),
+  hidden: new Set(),
   role: null,
   viewerId: null,
   viewerLabel: null,
@@ -52,6 +55,7 @@ const elements = {
   lightboxScene: document.querySelector("#lightboxScene"),
   lightboxFilename: document.querySelector("#lightboxFilename"),
   lightboxFavorite: document.querySelector("#lightboxFavorite"),
+  lightboxHide: document.querySelector("#lightboxHide"),
   lightboxRemove: document.querySelector("#lightboxRemove"),
   lightboxDownload: document.querySelector("#lightboxDownload"),
   closeLightbox: document.querySelector("#closeLightbox"),
@@ -142,6 +146,7 @@ async function openGallery() {
   renderSyncNotice();
   renderScenes();
   await loadFavorites();
+  await loadHidden();
   await resetGrid();
   observeSentinel();
   scrollToGalleryTop();
@@ -161,6 +166,7 @@ function applyPermissions() {
   elements.showFavorites.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.downloadFavoritesCsv.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxFavorite.classList.toggle("hidden", !state.permissions.canFavorite);
+  elements.lightboxHide.classList.toggle("hidden", state.role !== "client");
   elements.lightboxRemove.classList.toggle("hidden", state.role !== "client");
   elements.lightboxDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
 }
@@ -329,6 +335,30 @@ function createTile(image, index) {
   }
 
   if (state.role === "client") {
+    const crown = document.createElement("button");
+    crown.type = "button";
+    crown.className = `tile-crown`;
+    crown.title = "Set as cover photo";
+    crown.setAttribute("aria-label", "Set as cover photo");
+    crown.innerHTML = CROWN_ICON;
+    crown.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setCoverImage(image.id, tile);
+    });
+    tile.append(crown);
+
+    const hide = document.createElement("button");
+    hide.type = "button";
+    hide.className = `tile-hide ${state.hidden.has(image.id) ? "active" : ""}`;
+    hide.title = "Toggle hide from guests";
+    hide.setAttribute("aria-label", "Toggle hide from guests");
+    hide.innerHTML = HIDE_ICON;
+    hide.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleHide(image.id, tile);
+    });
+    tile.append(hide);
+
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "tile-remove";
@@ -386,6 +416,8 @@ function renderLightbox() {
   elements.lightboxScene.textContent = `${image.scene} #${image.sceneIndex}`;
   elements.lightboxFilename.textContent = image.filename;
   elements.lightboxFavorite.textContent = state.favorites.has(image.id) ? "Remove Favorite" : "Favorite";
+  elements.lightboxHide.textContent = state.hidden.has(image.id) ? "Unhide from guests" : "Hide from guests";
+  elements.lightboxHide.classList.toggle("active", state.hidden.has(image.id));
   elements.lightboxDownload.href = image.downloadUrl;
   elements.lightboxDownload.setAttribute("download", image.filename);
 
@@ -518,6 +550,110 @@ async function syncFavoritesToServer() {
   }
 }
 
+// ============================================================================
+// Hidden Photos (client-only feature)
+// ============================================================================
+
+function readHidden() {
+  try {
+    return JSON.parse(localStorage.getItem(hiddenStorageKey())) || [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHidden(hidden) {
+  localStorage.setItem(hiddenStorageKey(), JSON.stringify(hidden));
+}
+
+function hiddenStorageKey() {
+  return `starz-shots:hidden:${gallerySlug}`;
+}
+
+// Server is the source of truth; localStorage is an offline cache.
+async function loadHidden() {
+  try {
+    const payload = await (await apiFetch("/hidden")).json();
+    state.hidden = new Set(Array.isArray(payload.ids) ? payload.ids : []);
+    writeHidden([...state.hidden]);
+  } catch {
+    state.hidden = new Set(readHidden());
+  }
+}
+
+function toggleHide(imageId, tile) {
+  if (state.role !== "client") return;
+
+  if (state.hidden.has(imageId)) {
+    state.hidden.delete(imageId);
+  } else {
+    state.hidden.add(imageId);
+  }
+
+  writeHidden([...state.hidden]);
+  scheduleHiddenSync();
+  
+  // Update the hide button state
+  const hideBtn = tile.querySelector(".tile-hide");
+  if (hideBtn) {
+    hideBtn.classList.toggle("active", state.hidden.has(imageId));
+  }
+
+  if (elements.lightbox.open) renderLightbox();
+}
+
+let hiddenSyncTimer = null;
+
+function scheduleHiddenSync() {
+  if (hiddenSyncTimer) clearTimeout(hiddenSyncTimer);
+  hiddenSyncTimer = setTimeout(syncHiddenToServer, 500);
+}
+
+async function syncHiddenToServer() {
+  hiddenSyncTimer = null;
+  try {
+    await apiFetch("/hidden", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...state.hidden] }),
+      keepalive: true
+    });
+  } catch {
+    // Still cached locally; the next toggle (or reload) will retry the sync.
+  }
+}
+
+async function setCoverImage(imageId, tile) {
+  if (state.role !== "client") return;
+
+  try {
+    const response = await apiFetch(`/cover-image/${encodeURIComponent(imageId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.ok) {
+        // Update the cover image
+        if (elements.coverImage) {
+          elements.coverImage.src = data.coverImage;
+          elements.coverImage.alt = `Cover photo`;
+        }
+
+        // Highlight the crown button
+        const prevCrown = elements.galleryGrid.querySelector(".tile-crown.active");
+        if (prevCrown) prevCrown.classList.remove("active");
+        
+        const crown = tile.querySelector(".tile-crown");
+        if (crown) crown.classList.add("active");
+      }
+    }
+  } catch (error) {
+    console.error("Error setting cover image:", error);
+  }
+}
+
 function formatDate(dateValue) {
   if (!dateValue) return "";
   const parsed = new Date(dateValue);
@@ -547,16 +683,24 @@ function bindUiEvents() {
     const image = state.images[state.lightboxIndex];
     if (image) toggleFavorite(image.id);
   });
+  elements.lightboxHide.addEventListener("click", () => {
+    const image = state.images[state.lightboxIndex];
+    if (image) toggleHide(image.id);
+  });
   elements.lightboxRemove.addEventListener("click", () => {
     const image = state.images[state.lightboxIndex];
     if (image) removeImage(image);
   });
 
-  // Flush a pending favorites save if the viewer leaves before the debounce fires.
+  // Flush a pending favorites/hidden save if the viewer leaves before the debounce fires.
   window.addEventListener("pagehide", () => {
     if (favoritesSyncTimer) {
       clearTimeout(favoritesSyncTimer);
       syncFavoritesToServer();
+    }
+    if (hiddenSyncTimer) {
+      clearTimeout(hiddenSyncTimer);
+      syncHiddenToServer();
     }
   });
 }
