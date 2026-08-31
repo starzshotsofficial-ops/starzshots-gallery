@@ -6,6 +6,7 @@ const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const TRASH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>`;
 const CROWN_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 6h6l-5 4 2 6-6-4-6 4 2-6-5-4h6z"/></svg>`;
 const HIDE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><path d="M21 9.88M3 9.88"/></svg>`;
+const HIDDEN_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.58 10.58a2 2 0 0 0 2.83 2.83"/><path d="M9.88 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a20.86 20.86 0 0 1-3.13 4.19"/><path d="M6.61 6.61C3.9 8.46 1 12 1 12s4 8 11 8a10.88 10.88 0 0 0 4.24-.85"/></svg>`;
 
 const state = {
   meta: null,
@@ -353,9 +354,7 @@ function createTile(image, index) {
     const hide = document.createElement("button");
     hide.type = "button";
     hide.className = `tile-hide ${state.hidden.has(image.id) ? "active" : ""}`;
-    hide.title = "Toggle hide from guests";
-    hide.setAttribute("aria-label", "Toggle hide from guests");
-    hide.innerHTML = HIDE_ICON;
+    updateHideButton(hide, state.hidden.has(image.id));
     hide.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleHide(image.id, tile);
@@ -602,11 +601,18 @@ function toggleHide(imageId, tile = null) {
   if (tile) {
     const hideBtn = tile.querySelector(".tile-hide");
     if (hideBtn) {
-      hideBtn.classList.toggle("active", state.hidden.has(imageId));
+      updateHideButton(hideBtn, state.hidden.has(imageId));
     }
   }
 
   if (elements.lightbox.open) renderLightbox();
+}
+
+function updateHideButton(button, isHidden) {
+  button.classList.toggle("active", isHidden);
+  button.title = isHidden ? "Hidden from guests" : "Visible to guests";
+  button.setAttribute("aria-label", isHidden ? "Unhide from guests" : "Hide from guests");
+  button.innerHTML = isHidden ? HIDDEN_ICON : HIDE_ICON;
 }
 
 let hiddenSyncTimer = null;

@@ -70,7 +70,7 @@ button {
   align-self: center;
   width: min(100%, 430px);
   padding: 2rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.68);
   border: 1px solid rgba(222, 217, 207, 0.8);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -99,7 +99,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.85rem 0.9rem;
-  background: var(--panel);
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .access-row {
@@ -293,7 +293,7 @@ button {
   border: 0;
   border-radius: 50%;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 0.35rem 0.9rem rgba(20, 20, 20, 0.2);
   transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
@@ -362,7 +362,7 @@ button {
 .tile-hide:hover,
 .tile-remove:hover {
   transform: scale(1.08);
-  background: var(--panel);
+  background: rgba(255, 255, 255, 0.86);
 }
 
 .favorite-button.active,
