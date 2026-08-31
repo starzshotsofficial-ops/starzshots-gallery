@@ -343,6 +343,34 @@ button {
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
 }
 
+.tile-crown,
+.tile-hide {
+  position: absolute;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile-crown {
+  bottom: 0.6rem;
+  right: 3rem;
+}
+
+.tile-hide {
+  bottom: 0.6rem;
+  right: 5.6rem;
+}
+
+.tile-hide.hidden-active {
+  background: rgba(155, 61, 46, 0.9);
+}
+
 .download-button {
   display: inline-flex;
   align-items: center;

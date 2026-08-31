@@ -7,14 +7,17 @@ const os = require("os");
 const { execFile } = require("child_process");
 const { pipeline } = require("stream/promises");
 const { promisify } = require("util");
+const NotificationService = require("./lib/notification-service");
 
 const rootDir = __dirname;
 const port = Number(process.env.PORT || 3002);
 const env = { ...loadEnv(path.join(rootDir, ".env")), ...process.env };
 const config = readJson(path.join(rootDir, "config", "galleries.json")) || { galleries: [] };
+const notificationService = new NotificationService(path.join(rootDir, "config", "notifications.json"));
 const googleDriveRootFolderId = String(env.GOOGLE_DRIVE_ROOT_FOLDER_ID || "").trim();
 const adminToken = String(env.ADMIN_TOKEN || "").trim();
 const allowInsecureTls = String(env.GOOGLE_DRIVE_ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
+const baseUrl = env.BASE_URL || `http://localhost:${port}`;
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
 const galleryCache = new Map();
 const cacheTtlMs = 10 * 60 * 1000;
@@ -50,6 +53,14 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && /^\/api\/galleries\/[^/]+\/download-all$/.test(url.pathname)) {
       await handleDownloadAllRequest(url, response);
+      return;
+    }
+    if (request.method === "POST" && /^\/api\/galleries\/[^/]+\/set-cover$/.test(url.pathname)) {
+      await handleSetCover(url, request, response);
+      return;
+    }
+    if (request.method === "POST" && /^\/api\/galleries\/[^/]+\/toggle-hide-photo$/.test(url.pathname)) {
+      await handleToggleHidePhoto(url, request, response);
       return;
     }
     if (request.method === "GET" && url.pathname.startsWith("/api/galleries/")) {
@@ -127,6 +138,19 @@ async function handleCreateAdminEvent(request, response) {
   };
   config.galleries.push(gallery);
   writeConfig();
+
+  // Send notification for event creation
+  try {
+    const guestCode = getAccessCode(gallery, "guest");
+    const clientCodeText = clientCode;
+    const galleryUrl = `${baseUrl}/?event=${encodeURIComponent(slug)}`;
+    const googleDriveRootUrl = `https://drive.google.com/drive/folders/${googleDriveRootFolderId}`;
+    
+    await notificationService.notifyEventCreated(gallery, guestCode, clientCodeText, galleryUrl, googleDriveRootUrl);
+  } catch (notifyError) {
+    console.error(`Failed to send event creation notification: ${notifyError.message}`);
+  }
+
   sendJson(response, 201, { ok: true, event: toAdminEvent(gallery) });
 }
 
@@ -326,6 +350,69 @@ async function handleFileDownload(url, response) {
   await pipeline(upstream, response);
 }
 
+async function handleSetCover(url, request, response) {
+  const slug = decodeURIComponent(url.pathname.split("/").filter(Boolean)[2] || "");
+  const gallery = findGallery(slug);
+  if (!gallery) {
+    return sendJson(response, 404, { error: "Gallery not found." });
+  }
+
+  const body = await readJsonBody(request);
+  const photoId = String(body.photoId || "").trim();
+  const filename = String(body.filename || "").trim();
+
+  if (!photoId) {
+    return sendJson(response, 400, { error: "photoId is required." });
+  }
+
+  try {
+    gallery.coverImage = `/api/files/${encodeURIComponent(photoId)}`;
+    writeConfig();
+    galleryCache.delete(slug);
+    sendJson(response, 200, { ok: true, coverImage: gallery.coverImage });
+  } catch (error) {
+    sendJson(response, 500, { error: error.message });
+  }
+}
+
+async function handleToggleHidePhoto(url, request, response) {
+  const slug = decodeURIComponent(url.pathname.split("/").filter(Boolean)[2] || "");
+  const gallery = findGallery(slug);
+  if (!gallery) {
+    return sendJson(response, 404, { error: "Gallery not found." });
+  }
+
+  const body = await readJsonBody(request);
+  const photoId = String(body.photoId || "").trim();
+  const viewerId = String(body.viewerId || "").trim();
+
+  if (!photoId || !viewerId) {
+    return sendJson(response, 400, { error: "photoId and viewerId are required." });
+  }
+
+  try {
+    const hiddenPhotosPath = getHiddenPhotosPath(slug);
+    const hiddenPhotos = readHiddenPhotos(hiddenPhotosPath);
+
+    if (!hiddenPhotos[viewerId]) {
+      hiddenPhotos[viewerId] = [];
+    }
+
+    const index = hiddenPhotos[viewerId].indexOf(photoId);
+    if (index >= 0) {
+      hiddenPhotos[viewerId].splice(index, 1);
+    } else {
+      hiddenPhotos[viewerId].push(photoId);
+    }
+
+    writeHiddenPhotos(hiddenPhotosPath, hiddenPhotos);
+    galleryCache.delete(slug);
+    sendJson(response, 200, { ok: true, isHidden: !hiddenPhotos[viewerId].includes(photoId) });
+  } catch (error) {
+    sendJson(response, 500, { error: error.message });
+  }
+}
+
 async function driveJson(apiPath) {
   const result = await httpsRequest(`https://www.googleapis.com${apiPath}`, { Authorization: `Bearer ${await getAccessToken()}` });
   if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -398,3 +485,21 @@ function serveStatic(urlPath, response) { const relative = decodeURIComponent(ur
 function loadEnv(filePath) { if (!fs.existsSync(filePath)) return {}; return Object.fromEntries(fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter((line) => line && !line.trim().startsWith("#")).map((line) => { const index = line.indexOf("="); return [line.slice(0, index).trim(), line.slice(index + 1).trim().replace(/^['"]|['"]$/g, "")]; })); }
 function httpsRequest(url, headers, method = "GET", body = "") { return new Promise((resolve, reject) => { const request = https.request(url, { method, headers, rejectUnauthorized: !allowInsecureTls }, (response) => { const chunks = []; response.on("data", (chunk) => chunks.push(chunk)); response.on("end", () => resolve({ statusCode: response.statusCode, body: Buffer.concat(chunks).toString("utf8") })); }); request.on("error", reject); request.end(body); }); }
 function httpsStream(url, headers) { return new Promise((resolve, reject) => { const request = https.get(url, { headers, rejectUnauthorized: !allowInsecureTls }, resolve); request.on("error", reject); }); }
+
+function getHiddenPhotosPath(slug) {
+  return path.join(rootDir, "data", `${slug}-hidden-photos.json`);
+}
+
+function readHiddenPhotos(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeHiddenPhotos(filePath, hiddenPhotos) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(hiddenPhotos, null, 2)}\n`, "utf8");
+}

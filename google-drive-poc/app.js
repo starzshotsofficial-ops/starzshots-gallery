@@ -8,6 +8,7 @@ const state = {
   scene: "all",
   favoritesOnly: false,
   favorites: new Set(),
+  hiddenImages: new Set(),
   role: null,
   accessCode: null,
   viewerId: null,
@@ -45,6 +46,8 @@ const elements = {
   lightboxFavorite: document.querySelector("#lightboxFavorite"),
   lightboxRemove: document.querySelector("#lightboxRemove"),
   lightboxDownload: document.querySelector("#lightboxDownload"),
+  lightboxHide: document.querySelector("#lightboxHide"),
+  lightboxSetCover: document.querySelector("#lightboxSetCover"),
   closeLightbox: document.querySelector("#closeLightbox"),
   previousImage: document.querySelector("#previousImage"),
   nextImage: document.querySelector("#nextImage")
@@ -109,6 +112,7 @@ function openGallery() {
   elements.visitorRole.textContent = `${state.role === "client" ? "Client" : "Guest"}: ${state.viewerLabel}`;
   applyPermissions();
 
+  loadHiddenImages();
   renderScenes();
   renderGrid();
 }
@@ -120,6 +124,8 @@ function applyPermissions() {
   elements.lightboxFavorite.classList.toggle("hidden", !state.permissions.canFavorite);
   elements.lightboxDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
   elements.lightboxRemove.classList.toggle("hidden", !canManageGallery());
+  elements.lightboxHide?.classList.toggle("hidden", !canManageGallery());
+  elements.lightboxSetCover?.classList.toggle("hidden", !canManageGallery());
 }
 
 function renderScenes() {
@@ -217,6 +223,26 @@ function createTile(image, index) {
     await removeImagePermanently(image);
   });
 
+  const hide = document.createElement("button");
+  hide.type = "button";
+  hide.className = `tile-hide ${state.hiddenImages.has(image.id) ? "hidden-active" : ""}`;
+  hide.innerHTML = "👁️";
+  hide.title = state.hiddenImages.has(image.id) ? "Unhide from guests" : "Hide from guests";
+  hide.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await toggleHideImage(image);
+  });
+
+  const crown = document.createElement("button");
+  crown.type = "button";
+  crown.className = "tile-crown";
+  crown.innerHTML = "👑";
+  crown.title = "Set as cover picture";
+  crown.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await setAsCovertImage(image);
+  });
+
   tile.append(img);
   tile.append(numberTag);
   if (state.permissions.canFavorite) {
@@ -226,6 +252,8 @@ function createTile(image, index) {
     tile.append(download);
   }
   if (canManageGallery()) {
+    tile.append(hide);
+    tile.append(crown);
     tile.append(remove);
   }
   return tile;
@@ -239,7 +267,8 @@ function getFilteredImages() {
   return allImages.filter((image) => {
     const sceneMatches = state.scene === "all" || image.scene === state.scene;
     const favoriteMatches = !state.favoritesOnly || state.favorites.has(image.id);
-    return sceneMatches && favoriteMatches;
+    const notHidden = !state.hiddenImages.has(image.id);
+    return sceneMatches && favoriteMatches && notHidden;
   });
 }
 
@@ -293,6 +322,11 @@ function renderLightbox() {
   elements.lightboxFavorite.textContent = state.favorites.has(image.id) ? "Remove Favorite" : "Favorite";
   elements.lightboxDownload.href = image.downloadUrl || image.url;
   elements.lightboxDownload.setAttribute("download", image.filename);
+  
+  if (elements.lightboxHide) {
+    const isHidden = state.hiddenImages.has(image.id);
+    elements.lightboxHide.textContent = isHidden ? "Unhide from guests" : "Hide from guests";
+  }
 }
 
 function moveLightbox(direction) {
@@ -316,6 +350,24 @@ function writeFavorites(favorites) {
 
 function favoriteStorageKey() {
   return `starz-shots:favorites:${state.gallery.slug}:${state.role}:${state.viewerId}`;
+}
+
+function loadHiddenImages() {
+  try {
+    const key = hiddenImagesStorageKey();
+    const hidden = JSON.parse(localStorage.getItem(key)) || [];
+    state.hiddenImages = new Set(hidden);
+  } catch {
+    state.hiddenImages = new Set();
+  }
+}
+
+function saveHiddenImages() {
+  localStorage.setItem(hiddenImagesStorageKey(), JSON.stringify([...state.hiddenImages]));
+}
+
+function hiddenImagesStorageKey() {
+  return `starz-shots:hidden:${state.gallery.slug}:${state.role}:${state.viewerId}`;
 }
 
 function formatDate(dateValue) {
@@ -496,6 +548,63 @@ async function removeImagePermanently(image) {
   }
 }
 
+async function toggleHideImage(image) {
+  if (!canManageGallery()) return;
+
+  const isHidden = state.hiddenImages.has(image.id);
+  const action = isHidden ? "unhide" : "hide";
+
+  try {
+    const response = await fetch(`/api/galleries/${encodeURIComponent(gallerySlug)}/toggle-hide-photo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoId: image.id, viewerId: state.viewerId })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Unable to ${action} the photo.`);
+    }
+
+    if (isHidden) {
+      state.hiddenImages.delete(image.id);
+    } else {
+      state.hiddenImages.add(image.id);
+    }
+
+    saveHiddenImages();
+    renderGrid();
+    if (elements.lightbox.open) {
+      renderLightbox();
+    }
+  } catch (error) {
+    window.alert(error.message || `Failed to ${action} image.`);
+  }
+}
+
+async function setAsCovertImage(image) {
+  if (!canManageGallery()) return;
+
+  try {
+    const response = await fetch(`/api/galleries/${encodeURIComponent(gallerySlug)}/set-cover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoId: image.id, filename: image.filename })
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to set cover image.");
+    }
+
+    state.gallery.coverImage = image.url;
+    elements.coverImage.src = image.url;
+    
+    window.alert("Cover image updated successfully!");
+    renderGrid();
+  } catch (error) {
+    window.alert(error.message || "Failed to set cover image.");
+  }
+}
+
 function setAccessError(message) {
   elements.accessError.textContent = message || "";
 }
@@ -591,6 +700,16 @@ function bindUiEvents() {
     const image = state.visibleImages[state.lightboxIndex];
     if (!image) return;
     await removeImagePermanently(image);
+  });
+  elements.lightboxHide?.addEventListener("click", async () => {
+    const image = state.visibleImages[state.lightboxIndex];
+    if (!image) return;
+    await toggleHideImage(image);
+  });
+  elements.lightboxSetCover?.addEventListener("click", async () => {
+    const image = state.visibleImages[state.lightboxIndex];
+    if (!image) return;
+    await setAsCovertImage(image);
   });
 }
 
