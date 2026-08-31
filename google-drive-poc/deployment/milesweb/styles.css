@@ -327,12 +327,20 @@ button {
 .tile-crown,
 .tile-hide {
   position: absolute;
-  padding: 0.45rem 0.65rem;
-  border-radius: 6px;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border-radius: 50%;
   color: #fff;
-  background: rgba(87, 107, 80, 0.9);
+  background: rgba(155, 61, 46, 0.8);
   font-weight: 800;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  opacity: 0.85;
+  border: none;
 }
 
 .tile-crown {
@@ -341,24 +349,38 @@ button {
 }
 
 .tile-hide {
-  right: 3.5rem;
+  left: 3rem;
   bottom: 0.6rem;
-}
-
-.tile-crown.active,
-.tile-hide.active {
-  background: #f5a623;
-  color: var(--ink);
 }
 
 .tile-crown:hover,
 .tile-hide:hover {
-  background: #596b50;
+  opacity: 1;
+  transform: scale(1.1);
+  background: rgba(155, 61, 46, 1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
 }
 
-.tile-crown.active:hover,
+.tile-crown.active {
+  background: rgba(245, 166, 35, 0.95);
+  color: var(--ink);
+  opacity: 1;
+}
+
+.tile-hide.active {
+  background: rgba(116, 133, 106, 0.95);
+  color: #fff;
+  opacity: 1;
+}
+
+.tile-crown.active:hover {
+  background: rgba(245, 166, 35, 1);
+  transform: scale(1.1);
+}
+
 .tile-hide.active:hover {
-  background: #e09a1f;
+  background: rgba(116, 133, 106, 1);
+  transform: scale(1.1);
 }
 
 .tile-download,

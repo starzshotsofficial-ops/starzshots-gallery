@@ -581,7 +581,7 @@ async function loadHidden() {
   }
 }
 
-function toggleHide(imageId, tile) {
+function toggleHide(imageId, tile = null) {
   if (state.role !== "client") return;
 
   if (state.hidden.has(imageId)) {
@@ -593,10 +593,12 @@ function toggleHide(imageId, tile) {
   writeHidden([...state.hidden]);
   scheduleHiddenSync();
   
-  // Update the hide button state
-  const hideBtn = tile.querySelector(".tile-hide");
-  if (hideBtn) {
-    hideBtn.classList.toggle("active", state.hidden.has(imageId));
+  // Update the hide button state in grid if tile is provided
+  if (tile) {
+    const hideBtn = tile.querySelector(".tile-hide");
+    if (hideBtn) {
+      hideBtn.classList.toggle("active", state.hidden.has(imageId));
+    }
   }
 
   if (elements.lightbox.open) renderLightbox();

@@ -53,7 +53,26 @@ const sync = createSyncWorker({
   thumbnailSize,
   concurrency: readNumber(env, "SYNC_CONCURRENCY", 4),
   refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360),
-  onGalleryReady: (slug) => face.onSyncComplete(slug)
+  onGalleryReady: async (slug) => {
+    await face.onSyncComplete(slug);
+    
+    // Send photo cache completion notification asynchronously
+    setImmediate(async () => {
+      try {
+        const gallery = config.find(slug);
+        const index = cache.readIndex(slug);
+        if (gallery && index) {
+          await notifications.notifyPhotoCacheCompleted({
+            eventName: gallery.eventName,
+            photoCount: index.totalImages || 0
+          });
+          console.log(`[Notifications] Photo cache notification sent for gallery: ${slug}`);
+        }
+      } catch (error) {
+        console.error(`[Notifications] Failed to send photo cache notification:`, error.message);
+      }
+    });
+  }
 });
 const sessions = createSessionManager({
   secret: resolveSessionSecret(),
@@ -73,6 +92,23 @@ const face = createFaceRecognition({
   sendJson,
   readJsonBody,
   SECURITY_HEADERS,
+  onIndexComplete: async (slug, status) => {
+    // Send face index completion notification asynchronously
+    setImmediate(async () => {
+      try {
+        const gallery = config.find(slug);
+        if (gallery && status?.completed) {
+          await notifications.notifyFaceIndexCompleted({
+            eventName: gallery.eventName,
+            faceCount: status.faceCount || 0
+          });
+          console.log(`[Notifications] Face index notification sent for gallery: ${slug}`);
+        }
+      } catch (error) {
+        console.error(`[Notifications] Failed to send face index notification:`, error.message);
+      }
+    });
+  },
   options: {
     matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.4")) || 0.4,
     faceImageSize: readNumber(env, "FACE_IMAGE_SIZE", 2048),
@@ -237,7 +273,7 @@ function handleImages(response, gallery, url, session) {
   const filteredImages = result.images.filter((image) => !hiddenIds.has(image.id));
 
   return sendJson(response, 200, {
-    total: result.total - (session?.role !== "client" ? hiddenIds.size : 0),
+    total: result.total,
     offset,
     limit,
     images: filteredImages.map((image) => withUrls(gallery.slug, image))
@@ -585,20 +621,28 @@ async function handleCreateEvent(request, response) {
 
   sync.enqueue(slug);
 
-  // Send notifications for event creation
-  const guestCode = getAccessCode(gallery, "guest");
-  const galleryUrl = `${String(body.baseUrl || "http://localhost:3001").trim()}/?event=${encodeURIComponent(slug)}`;
-  const googleDriveFolderUrl = String(body.googleDriveFolderUrl || "").trim() || "N/A";
+  // Send notifications for event creation asynchronously (don't wait for API response)
+  setImmediate(async () => {
+    try {
+      const guestCode = getAccessCode(gallery, "guest");
+      const protocol = isSecureRequest(request) ? "https" : "http";
+      const host = request.headers.host || "localhost";
+      const galleryUrl = `${protocol}://${host}${basePath}/?event=${encodeURIComponent(slug)}`;
+      const googleDriveFolderUrl = String(body.googleDriveFolderUrl || "").trim() || 
+        `https://drive.google.com/drive/folders/${encodeURIComponent(gallery.googleDriveFolderName || gallery.slug)}`;
 
-  notifications.notifyEventCreated({
-    eventName,
-    eventDate: gallery.eventDate,
-    clientCode,
-    guestCode,
-    galleryUrl,
-    googleDriveFolderUrl
-  }).catch((error) => {
-    console.error("Error sending event creation notifications:", error);
+      await notifications.notifyEventCreated({
+        eventName,
+        eventDate: gallery.eventDate,
+        clientCode,
+        guestCode,
+        galleryUrl,
+        googleDriveFolderUrl
+      });
+      console.log(`[Notifications] Event created notification sent for gallery: ${slug}`);
+    } catch (error) {
+      console.error(`[Notifications] Failed to send event creation notifications:`, error.message);
+    }
   });
 
   return sendJson(response, 201, { ok: true, event: toAdminEvent(gallery) });
