@@ -279,16 +279,29 @@ button {
   display: block;
 }
 
+.favorite-button,
+.tile-download,
+.tile-crown,
+.tile-hide,
+.tile-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0.35rem 0.9rem rgba(20, 20, 20, 0.2);
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
 .favorite-button {
   position: absolute;
   top: 0.6rem;
   right: 0.6rem;
-  width: 2.35rem;
-  height: 2.35rem;
-  border-radius: 999px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
 }
 
 .favorite-button.active {
@@ -311,8 +324,6 @@ button {
 .tile-remove,
 .remove-button {
   border-radius: 6px;
-  color: #fff;
-  background: rgba(179, 38, 30, 0.9);
   font-weight: 800;
 }
 
@@ -320,74 +331,69 @@ button {
   position: absolute;
   right: 0.6rem;
   bottom: 0.6rem;
-  padding: 0.45rem 0.65rem;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.tile-client-actions {
+  position: absolute;
+  bottom: 0.6rem;
+  left: 50%;
+  display: flex;
+  gap: 0.4rem;
+  transform: translateX(-50%);
 }
 
 .tile-crown,
 .tile-hide {
-  position: absolute;
-  width: 2.2rem;
-  height: 2.2rem;
-  padding: 0;
-  border-radius: 50%;
-  color: #fff;
-  background: rgba(155, 61, 46, 0.8);
   font-weight: 800;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.25s ease;
-  opacity: 0.85;
-  border: none;
 }
 
-.tile-crown {
-  left: 0.6rem;
-  bottom: 0.6rem;
+.favorite-button svg,
+.tile-download svg,
+.tile-crown svg,
+.tile-hide svg,
+.tile-remove svg {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
-.tile-hide {
-  left: 3rem;
-  bottom: 0.6rem;
-}
-
+.favorite-button:hover,
+.tile-download:hover,
 .tile-crown:hover,
-.tile-hide:hover {
-  opacity: 1;
-  transform: scale(1.1);
-  background: rgba(155, 61, 46, 1);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+.tile-hide:hover,
+.tile-remove:hover {
+  transform: scale(1.08);
+  background: var(--panel);
 }
 
-.tile-crown.active {
-  background: rgba(245, 166, 35, 0.95);
-  color: var(--ink);
-  opacity: 1;
+.favorite-button.active,
+.tile-crown.active,
+.tile-hide.active {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0.35rem 0.9rem rgba(20, 20, 20, 0.2), inset 0 0 0 0.12rem currentColor;
 }
 
 .tile-hide.active {
-  background: rgba(116, 133, 106, 0.95);
-  color: #fff;
-  opacity: 1;
+  color: var(--sage);
 }
 
-.tile-crown.active:hover {
-  background: rgba(245, 166, 35, 1);
-  transform: scale(1.1);
+.tile-remove {
+  color: var(--accent);
 }
 
-.tile-hide.active:hover {
-  background: rgba(116, 133, 106, 1);
-  transform: scale(1.1);
+.tile-remove:hover {
+  color: var(--accent-strong);
+}
+
+.tile-crown.active:hover,
+.tile-hide.active:hover,
+.favorite-button.active:hover {
+  background: var(--panel);
 }
 
 .tile-download,
 .download-button {
   border-radius: 6px;
-  color: #fff;
-  background: var(--sage);
   font-weight: 800;
   text-decoration: none;
 }
@@ -396,8 +402,6 @@ button {
   position: absolute;
   left: 0.6rem;
   bottom: 0.6rem;
-  padding: 0.45rem 0.65rem;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
 }
 
 .download-button {
@@ -410,12 +414,12 @@ button {
 
 .tile-download:hover,
 .download-button:hover {
-  background: #596b50;
+  color: var(--sage);
 }
 
 .tile-remove:hover,
 .remove-button:hover {
-  background: #8b241a;
+  color: var(--accent-strong);
 }
 
 dialog {

@@ -335,6 +335,9 @@ function createTile(image, index) {
   }
 
   if (state.role === "client") {
+    const clientActions = document.createElement("div");
+    clientActions.className = "tile-client-actions";
+
     const crown = document.createElement("button");
     crown.type = "button";
     crown.className = `tile-crown`;
@@ -345,7 +348,7 @@ function createTile(image, index) {
       event.stopPropagation();
       setCoverImage(image.id, tile);
     });
-    tile.append(crown);
+    clientActions.append(crown);
 
     const hide = document.createElement("button");
     hide.type = "button";
@@ -357,7 +360,9 @@ function createTile(image, index) {
       event.stopPropagation();
       toggleHide(image.id, tile);
     });
-    tile.append(hide);
+    clientActions.append(hide);
+
+    tile.append(clientActions);
 
     const remove = document.createElement("button");
     remove.type = "button";
