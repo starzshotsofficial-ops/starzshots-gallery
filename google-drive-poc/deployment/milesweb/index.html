@@ -55,6 +55,16 @@
       <div id="gridSentinel" class="grid-sentinel"></div>
       <p id="gridStatus" class="grid-status muted"></p>
     </section>
+
+    <div id="selectionBar" class="selection-bar hidden" role="toolbar" aria-label="Selected photo actions">
+      <span class="selection-count"><b id="selectionCount">0</b> selected</span>
+      <button type="button" id="selectionClear" class="selection-clear" title="Clear selection" aria-label="Clear selection"></button>
+      <span class="selection-divider" aria-hidden="true"></span>
+      <button type="button" id="selectionDownload" class="selection-action" title="Download" aria-label="Download"></button>
+      <button type="button" id="selectionHide" class="selection-action" title="Hide from guests" aria-label="Hide from guests"></button>
+      <button type="button" id="selectionCover" class="selection-action hidden" title="Set as cover photo" aria-label="Set as cover photo"></button>
+      <button type="button" id="selectionDelete" class="selection-action danger" title="Delete" aria-label="Delete"></button>
+    </div>
   </main>
 
   <dialog id="lightbox">

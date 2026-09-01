@@ -7,6 +7,8 @@ const TRASH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const CROWN_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 6h6l-5 4 2 6-6-4-6 4 2-6-5-4h6z"/></svg>`;
 const HIDE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><path d="M21 9.88M3 9.88"/></svg>`;
 const HIDDEN_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.58 10.58a2 2 0 0 0 2.83 2.83"/><path d="M9.88 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a20.86 20.86 0 0 1-3.13 4.19"/><path d="M6.61 6.61C3.9 8.46 1 12 1 12s4 8 11 8a10.88 10.88 0 0 0 4.24-.85"/></svg>`;
+const CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`;
+const CLOSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg>`;
 
 const state = {
   meta: null,
@@ -16,6 +18,8 @@ const state = {
   favorites: new Set(),
   removed: new Set(),
   hidden: new Set(),
+  selected: new Set(),
+  tiles: new Map(),
   role: null,
   viewerId: null,
   viewerLabel: null,
@@ -51,6 +55,13 @@ const elements = {
   downloadFavoritesCsv: document.querySelector("#downloadFavoritesCsv"),
   findMyPhotos: document.querySelector("#findMyPhotos"),
   visitorRole: document.querySelector("#visitorRole"),
+  selectionBar: document.querySelector("#selectionBar"),
+  selectionCount: document.querySelector("#selectionCount"),
+  selectionDownload: document.querySelector("#selectionDownload"),
+  selectionHide: document.querySelector("#selectionHide"),
+  selectionCover: document.querySelector("#selectionCover"),
+  selectionDelete: document.querySelector("#selectionDelete"),
+  selectionClear: document.querySelector("#selectionClear"),
   lightbox: document.querySelector("#lightbox"),
   lightboxImage: document.querySelector("#lightboxImage"),
   lightboxScene: document.querySelector("#lightboxScene"),
@@ -217,6 +228,9 @@ async function resetGrid() {
   state.offset = 0;
   state.total = 0;
   state.exhausted = false;
+  state.tiles.clear();
+  state.selected.clear();
+  renderSelectionBar();
   elements.galleryGrid.replaceChildren();
   elements.showAll.classList.toggle("active", !state.favoritesOnly);
   elements.showFavorites.classList.toggle("active", state.favoritesOnly);
@@ -291,15 +305,23 @@ function appendTiles(images) {
 }
 
 function createTile(image, index) {
+  const isClient = state.role === "client";
   const tile = document.createElement("article");
   tile.className = "photo-tile";
+  tile.dataset.imageId = image.id;
+  tile.classList.toggle("selected", state.selected.has(image.id));
+  tile.classList.toggle("is-hidden-from-guests", isClient && state.hidden.has(image.id));
 
   const img = document.createElement("img");
   img.src = image.thumbnailUrl;
   img.alt = image.filename;
   img.loading = "lazy";
   img.decoding = "async";
-  img.addEventListener("click", () => openLightbox(index));
+  // Once a selection is in progress, tapping a photo extends the selection instead of opening it.
+  img.addEventListener("click", () => {
+    if (isClient && state.selected.size) toggleSelect(image.id);
+    else openLightbox(index);
+  });
 
   const numberTag = document.createElement("span");
   numberTag.className = "image-number-tag";
@@ -307,21 +329,38 @@ function createTile(image, index) {
 
   tile.append(img, numberTag);
 
+  const overlay = document.createElement("div");
+  overlay.className = "tile-overlay";
+
   if (state.permissions.canFavorite) {
     const favorite = document.createElement("button");
     favorite.type = "button";
     favorite.className = `favorite-button ${state.favorites.has(image.id) ? "active" : ""}`;
     favorite.innerHTML = "&hearts;";
     favorite.title = "Toggle favorite";
+    favorite.setAttribute("aria-label", "Toggle favorite");
     favorite.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleFavorite(image.id);
       favorite.classList.toggle("active", state.favorites.has(image.id));
     });
-    tile.append(favorite);
+    overlay.append(favorite);
   }
 
-  if (state.permissions.canDownloadSingle) {
+  if (isClient) {
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = `tile-select ${state.selected.has(image.id) ? "active" : ""}`;
+    select.title = "Select photo";
+    select.setAttribute("aria-label", "Select photo");
+    select.setAttribute("aria-pressed", String(state.selected.has(image.id)));
+    select.innerHTML = CHECK_ICON;
+    select.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleSelect(image.id);
+    });
+    overlay.append(select);
+  } else if (state.permissions.canDownloadSingle) {
     const download = document.createElement("a");
     download.className = "tile-download";
     download.href = image.downloadUrl;
@@ -332,51 +371,127 @@ function createTile(image, index) {
     download.setAttribute("download", image.filename);
     download.innerHTML = DOWNLOAD_ICON;
     download.addEventListener("click", (event) => event.stopPropagation());
-    tile.append(download);
+    overlay.append(download);
   }
 
-  if (state.role === "client") {
-    const clientActions = document.createElement("div");
-    clientActions.className = "tile-client-actions";
-
-    const crown = document.createElement("button");
-    crown.type = "button";
-    crown.className = `tile-crown`;
-    crown.title = "Set as cover photo";
-    crown.setAttribute("aria-label", "Set as cover photo");
-    crown.innerHTML = CROWN_ICON;
-    crown.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setCoverImage(image.id, tile);
-    });
-    clientActions.append(crown);
-
-    const hide = document.createElement("button");
-    hide.type = "button";
-    hide.className = `tile-hide ${state.hidden.has(image.id) ? "active" : ""}`;
-    updateHideButton(hide, state.hidden.has(image.id));
-    hide.addEventListener("click", (event) => {
-      event.stopPropagation();
-      toggleHide(image.id, tile);
-    });
-    clientActions.append(hide);
-
-    tile.append(clientActions);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "tile-remove";
-    remove.title = "Remove photo";
-    remove.setAttribute("aria-label", "Remove photo");
-    remove.innerHTML = TRASH_ICON;
-    remove.addEventListener("click", (event) => {
-      event.stopPropagation();
-      removeImage(image, tile);
-    });
-    tile.append(remove);
-  }
-
+  tile.append(overlay);
+  state.tiles.set(image.id, tile);
   return tile;
+}
+
+// ============================================================================
+// Multi-select actions (client-only)
+// ============================================================================
+
+function toggleSelect(imageId) {
+  if (state.role !== "client") return;
+
+  if (state.selected.has(imageId)) state.selected.delete(imageId);
+  else state.selected.add(imageId);
+
+  paintSelection(imageId);
+  renderSelectionBar();
+}
+
+function paintSelection(imageId) {
+  const tile = state.tiles.get(imageId);
+  if (!tile) return;
+
+  const isSelected = state.selected.has(imageId);
+  tile.classList.toggle("selected", isSelected);
+
+  const button = tile.querySelector(".tile-select");
+  if (button) {
+    button.classList.toggle("active", isSelected);
+    button.setAttribute("aria-pressed", String(isSelected));
+  }
+}
+
+function clearSelection() {
+  const ids = [...state.selected];
+  state.selected.clear();
+  ids.forEach(paintSelection);
+  renderSelectionBar();
+}
+
+function selectedImages() {
+  return state.images.filter((image) => state.selected.has(image.id));
+}
+
+function renderSelectionBar() {
+  if (!elements.selectionBar) return;
+
+  const ids = [...state.selected];
+  elements.selectionBar.classList.toggle("hidden", ids.length === 0);
+  elements.selectionCount.textContent = String(ids.length);
+  elements.selectionCover.classList.toggle("hidden", ids.length !== 1);
+  elements.selectionDownload.classList.toggle("hidden", !state.permissions.canDownloadSingle);
+
+  const allHidden = ids.length > 0 && ids.every((id) => state.hidden.has(id));
+  elements.selectionHide.innerHTML = allHidden ? HIDDEN_ICON : HIDE_ICON;
+  elements.selectionHide.classList.toggle("active", allHidden);
+  elements.selectionHide.title = allHidden ? "Unhide from guests" : "Hide from guests";
+  elements.selectionHide.setAttribute("aria-label", elements.selectionHide.title);
+}
+
+function downloadSelected() {
+  const images = selectedImages();
+  if (!images.length) return;
+
+  // Browsers throttle simultaneous downloads, so stagger the anchor clicks.
+  images.forEach((image, position) => {
+    setTimeout(() => {
+      const link = document.createElement("a");
+      link.href = image.downloadUrl;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.download = image.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }, position * 400);
+  });
+}
+
+function hideSelected() {
+  if (state.role !== "client") return;
+
+  const ids = [...state.selected];
+  if (!ids.length) return;
+
+  const allHidden = ids.every((id) => state.hidden.has(id));
+  ids.forEach((id) => {
+    if (allHidden) state.hidden.delete(id);
+    else state.hidden.add(id);
+    state.tiles.get(id)?.classList.toggle("is-hidden-from-guests", state.hidden.has(id));
+  });
+
+  writeHidden([...state.hidden]);
+  scheduleHiddenSync();
+  renderSelectionBar();
+  if (elements.lightbox.open) renderLightbox();
+}
+
+async function deleteSelected() {
+  if (state.role !== "client") return;
+
+  const images = selectedImages();
+  if (!images.length) return;
+  if (!window.confirm(`Permanently remove ${images.length} photo${images.length === 1 ? "" : "s"}? They are moved to the Google Drive trash and removed from the gallery for everyone.`)) return;
+
+  let failures = 0;
+  let driveFailures = 0;
+
+  for (const image of images) {
+    const result = await deleteImage(image, state.tiles.get(image.id));
+    if (!result.ok) failures += 1;
+    else if (result.driveTrashed === false) driveFailures += 1;
+  }
+
+  clearSelection();
+
+  if (failures) window.alert(`${failures} photo${failures === 1 ? "" : "s"} could not be removed.`);
+  else if (driveFailures) window.alert(`${driveFailures} photo${driveFailures === 1 ? "" : "s"} were removed from the gallery but could not be deleted from Google Drive (the service account lacks permission).`);
 }
 
 function observeSentinel() {
@@ -453,7 +568,12 @@ function removeImage(image, tile) {
   if (state.role !== "client") return;
   if (!window.confirm("Permanently remove this photo? It is moved to the Google Drive trash and removed from the gallery for everyone.")) return;
 
-  void deleteImage(image, tile);
+  void deleteImage(image, tile || state.tiles.get(image.id)).then((result) => {
+    if (!result.ok) window.alert(result.error);
+    else if (result.driveTrashed === false) {
+      window.alert("Photo removed from the gallery. It could not be deleted from Google Drive (the service account lacks permission), so the original file still exists in Drive.");
+    }
+  });
 }
 
 async function deleteImage(image, tile) {
@@ -462,17 +582,16 @@ async function deleteImage(image, tile) {
     const response = await apiFetch(`/files/${encodeURIComponent(image.id)}`, { method: "DELETE" });
     payload = await response.json().catch(() => ({}));
   } catch (error) {
-    window.alert(error.message || "Unable to remove the photo.");
-    return;
+    return { ok: false, error: error.message || "Unable to remove the photo." };
   }
 
   state.removed.add(image.id);
+  state.selected.delete(image.id);
+  state.tiles.delete(image.id);
   tile?.remove();
   if (elements.lightbox.open) elements.lightbox.close();
 
-  if (payload && payload.driveTrashed === false) {
-    window.alert("Photo removed from the gallery. It could not be deleted from Google Drive (the service account lacks permission), so the original file still exists in Drive.");
-  }
+  return { ok: true, driveTrashed: payload?.driveTrashed };
 }
 
 async function downloadFavoritesCsv() {
@@ -596,23 +715,12 @@ function toggleHide(imageId, tile = null) {
 
   writeHidden([...state.hidden]);
   scheduleHiddenSync();
-  
-  // Update the hide button state in grid if tile is provided
-  if (tile) {
-    const hideBtn = tile.querySelector(".tile-hide");
-    if (hideBtn) {
-      updateHideButton(hideBtn, state.hidden.has(imageId));
-    }
-  }
 
+  const target = tile || state.tiles.get(imageId);
+  target?.classList.toggle("is-hidden-from-guests", state.hidden.has(imageId));
+
+  renderSelectionBar();
   if (elements.lightbox.open) renderLightbox();
-}
-
-function updateHideButton(button, isHidden) {
-  button.classList.toggle("active", isHidden);
-  button.title = isHidden ? "Hidden from guests" : "Visible to guests";
-  button.setAttribute("aria-label", isHidden ? "Unhide from guests" : "Hide from guests");
-  button.innerHTML = isHidden ? HIDDEN_ICON : HIDE_ICON;
 }
 
 let hiddenSyncTimer = null;
@@ -648,18 +756,14 @@ async function setCoverImage(imageId, tile) {
     if (response.ok) {
       const data = await response.json();
       if (data.ok) {
-        // Update the cover image
         if (elements.coverImage) {
           elements.coverImage.src = data.coverImage;
           elements.coverImage.alt = `Cover photo`;
         }
 
-        // Highlight the crown button
-        const prevCrown = elements.galleryGrid.querySelector(".tile-crown.active");
-        if (prevCrown) prevCrown.classList.remove("active");
-        
-        const crown = tile.querySelector(".tile-crown");
-        if (crown) crown.classList.add("active");
+        const previousCover = elements.galleryGrid.querySelector(".photo-tile.is-cover");
+        previousCover?.classList.remove("is-cover");
+        (tile || state.tiles.get(imageId))?.classList.add("is-cover");
       }
     }
   } catch (error) {
@@ -688,6 +792,25 @@ function bindUiEvents() {
   });
 
   elements.downloadFavoritesCsv.addEventListener("click", downloadFavoritesCsv);
+
+  elements.selectionDownload.innerHTML = DOWNLOAD_ICON;
+  elements.selectionHide.innerHTML = HIDE_ICON;
+  elements.selectionCover.innerHTML = CROWN_ICON;
+  elements.selectionDelete.innerHTML = TRASH_ICON;
+  elements.selectionClear.innerHTML = CLOSE_ICON;
+
+  elements.selectionDownload.addEventListener("click", downloadSelected);
+  elements.selectionHide.addEventListener("click", hideSelected);
+  elements.selectionDelete.addEventListener("click", () => void deleteSelected());
+  elements.selectionClear.addEventListener("click", clearSelection);
+  elements.selectionCover.addEventListener("click", () => {
+    const [imageId] = [...state.selected];
+    if (imageId) void setCoverImage(imageId);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !elements.lightbox.open && state.selected.size) clearSelection();
+  });
 
   elements.closeLightbox.addEventListener("click", () => elements.lightbox.close());
   elements.previousImage.addEventListener("click", () => moveLightbox(-1));

@@ -69,35 +69,183 @@
   background: #8b241a;
 }
 
-/* Round icon buttons on each tile, matching the favorite heart. */
-.tile-download,
-.tile-remove {
+/* ---------------------------------------------------------------------------
+   Tile overlay actions + multi-select action bar
+   --------------------------------------------------------------------------- */
+
+.tile-overlay {
   position: absolute;
-  bottom: 0.6rem;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.tile-overlay .favorite-button,
+.tile-overlay .tile-download,
+.tile-overlay .tile-select {
+  position: static;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 2.35rem;
   height: 2.35rem;
   padding: 0;
-  border: none;
+  border: 0;
   border-radius: 999px;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 0.35rem 0.9rem rgba(20, 20, 20, 0.2);
   cursor: pointer;
+  transition: transform 0.18s ease, background-color 0.18s ease, color 0.18s ease;
 }
 
-.tile-download {
+.tile-overlay .tile-select svg,
+.tile-overlay .tile-download svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.tile-overlay .tile-select.active {
+  color: #fff;
+  background: var(--accent);
+}
+
+/* Desktop: the tile shows only its number until the pointer is over it. */
+@media (hover: hover) and (pointer: fine) {
+  .tile-overlay {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .photo-tile:hover .tile-overlay,
+  .photo-tile:focus-within .tile-overlay,
+  .photo-tile.selected .tile-overlay {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Touch: keep the buttons on screen, translucent so they don't cover the photo. */
+@media (hover: none) {
+  .tile-overlay .favorite-button,
+  .tile-overlay .tile-download,
+  .tile-overlay .tile-select {
+    background: rgba(255, 255, 255, 0.62);
+  }
+
+  .tile-overlay .favorite-button.active,
+  .tile-overlay .tile-select.active {
+    background: var(--accent);
+  }
+}
+
+.photo-tile.selected {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.photo-tile.selected img {
+  opacity: 0.86;
+}
+
+.photo-tile.is-hidden-from-guests img {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+}
+
+.photo-tile.is-hidden-from-guests::after {
+  content: "Hidden";
+  position: absolute;
   left: 0.6rem;
+  bottom: 0.6rem;
+  padding: 0.22rem 0.45rem;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.62);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
-.tile-remove {
-  right: 0.6rem;
+.photo-tile.is-cover {
+  box-shadow: 0 0 0 3px var(--sage);
 }
 
-.tile-download svg,
-.tile-remove svg {
-  width: 1.2rem;
-  height: 1.2rem;
+.selection-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(22, 22, 21, 0.94);
+  box-shadow: 0 1rem 2.4rem rgba(0, 0, 0, 0.35);
+  transform: translateX(-50%);
+}
+
+.selection-bar.hidden {
+  display: none;
+}
+
+.selection-count {
+  padding: 0 0.35rem 0 0.6rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.selection-divider {
+  width: 1px;
+  height: 1.4rem;
+  margin: 0 0.15rem;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.selection-action,
+.selection-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.selection-action svg,
+.selection-clear svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.selection-action:hover,
+.selection-clear:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.selection-action.active {
+  color: var(--sage);
+}
+
+.selection-action.danger:hover {
+  color: #fff;
+  background: rgba(179, 38, 30, 0.92);
+}
+
+.selection-action.hidden {
+  display: none;
 }
 
 /* Responsive columns + toolbar for tablets and phones. */
@@ -138,11 +286,19 @@
 }
 
 @media (max-width: 430px) {
-  .favorite-button,
-  .tile-download,
-  .tile-remove {
+  .tile-overlay .favorite-button,
+  .tile-overlay .tile-download,
+  .tile-overlay .tile-select {
     width: 2.1rem;
     height: 2.1rem;
+  }
+
+  .selection-bar {
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: 0.85rem;
+    justify-content: space-between;
+    transform: none;
   }
 }
 
