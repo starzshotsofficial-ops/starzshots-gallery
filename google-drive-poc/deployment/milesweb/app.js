@@ -329,8 +329,11 @@ function createTile(image, index) {
 
   tile.append(img, numberTag);
 
-  const overlay = document.createElement("div");
-  overlay.className = "tile-overlay";
+  const topOverlay = document.createElement("div");
+  topOverlay.className = "tile-overlay tile-overlay-top";
+
+  const bottomOverlay = document.createElement("div");
+  bottomOverlay.className = "tile-overlay tile-overlay-bottom";
 
   if (state.permissions.canFavorite) {
     const favorite = document.createElement("button");
@@ -344,7 +347,7 @@ function createTile(image, index) {
       toggleFavorite(image.id);
       favorite.classList.toggle("active", state.favorites.has(image.id));
     });
-    overlay.append(favorite);
+    topOverlay.append(favorite);
   }
 
   if (isClient) {
@@ -359,7 +362,7 @@ function createTile(image, index) {
       event.stopPropagation();
       toggleSelect(image.id);
     });
-    overlay.append(select);
+    bottomOverlay.append(select);
   } else if (state.permissions.canDownloadSingle) {
     const download = document.createElement("a");
     download.className = "tile-download";
@@ -371,10 +374,10 @@ function createTile(image, index) {
     download.setAttribute("download", image.filename);
     download.innerHTML = DOWNLOAD_ICON;
     download.addEventListener("click", (event) => event.stopPropagation());
-    overlay.append(download);
+    bottomOverlay.append(download);
   }
 
-  tile.append(overlay);
+  tile.append(topOverlay, bottomOverlay);
   state.tiles.set(image.id, tile);
   return tile;
 }
