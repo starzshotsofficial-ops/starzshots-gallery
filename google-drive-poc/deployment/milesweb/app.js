@@ -435,6 +435,7 @@ function renderSelectionBar() {
   elements.selectionHide.classList.toggle("active", allHidden);
   elements.selectionHide.title = allHidden ? "Unhide from guests" : "Hide from guests";
   elements.selectionHide.setAttribute("aria-label", elements.selectionHide.title);
+  elements.selectionHide.dataset.label = allHidden ? "Unhide" : "Hide";
 }
 
 function downloadSelected() {
@@ -542,12 +543,14 @@ function renderLightbox() {
   elements.lightboxFavorite.classList.toggle("active", isFavorite);
   elements.lightboxFavorite.title = isFavorite ? "Remove favorite" : "Add favorite";
   elements.lightboxFavorite.setAttribute("aria-label", elements.lightboxFavorite.title);
+  elements.lightboxFavorite.dataset.label = isFavorite ? "Favorited" : "Favorite";
 
   const isHidden = state.hidden.has(image.id);
   elements.lightboxHide.innerHTML = isHidden ? HIDDEN_ICON : HIDE_ICON;
   elements.lightboxHide.classList.toggle("active", isHidden);
   elements.lightboxHide.title = isHidden ? "Unhide from guests" : "Hide from guests";
   elements.lightboxHide.setAttribute("aria-label", elements.lightboxHide.title);
+  elements.lightboxHide.dataset.label = isHidden ? "Unhide" : "Hide";
 
   elements.lightboxDownload.href = image.downloadUrl;
   elements.lightboxDownload.setAttribute("download", image.filename);

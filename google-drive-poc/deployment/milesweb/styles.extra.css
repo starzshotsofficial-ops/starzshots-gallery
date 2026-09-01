@@ -314,12 +314,6 @@
   height: 1.2rem;
 }
 
-.dialog-actions > button:hover,
-.dialog-actions > .download-button:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.32);
-}
-
 #lightboxFavorite,
 #lightboxRemove {
   background: rgba(255, 255, 255, 0.16);
@@ -335,8 +329,69 @@
   color: var(--sage);
 }
 
-#lightboxRemove:hover {
-  background: rgba(179, 38, 30, 0.92);
+/* Touch devices keep :hover latched after a tap, so hover styling is pointer-only. */
+@media (hover: hover) and (pointer: fine) {
+  .dialog-actions > button:hover,
+  .dialog-actions > .download-button:hover,
+  #lightboxFavorite:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.32);
+  }
+
+  #lightboxFavorite.active:hover {
+    background: var(--accent-strong);
+  }
+
+  #lightboxRemove:hover {
+    background: rgba(179, 38, 30, 0.92);
+  }
+}
+
+/* Touch: icons alone are ambiguous, so caption each action button. */
+@media (hover: none) {
+  #lightboxFavorite:hover,
+  #lightboxRemove:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  #lightboxFavorite.active:hover {
+    background: var(--accent);
+  }
+
+  .dialog-actions > button,
+  .dialog-actions > .download-button,
+  .selection-action,
+  .selection-clear {
+    flex-direction: column;
+    gap: 0.15rem;
+    width: auto;
+    min-width: 3.2rem;
+    height: auto;
+    min-height: 0;
+    padding: 0.4rem 0.35rem 0.35rem;
+    border-radius: 0.85rem;
+  }
+
+  .dialog-actions > button::after,
+  .dialog-actions > .download-button::after,
+  .selection-action::after,
+  .selection-clear::after {
+    content: attr(data-label);
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .selection-bar {
+    gap: 0.15rem;
+  }
+
+  .selection-count {
+    padding: 0 0.25rem 0 0.45rem;
+    font-size: 0.8rem;
+  }
 }
 
 /* Responsive columns + toolbar for tablets and phones. */
