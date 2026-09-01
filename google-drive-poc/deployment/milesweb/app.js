@@ -537,9 +537,18 @@ function renderLightbox() {
   elements.lightboxImage.alt = image.filename;
   elements.lightboxScene.textContent = `${image.scene} #${image.sceneIndex}`;
   elements.lightboxFilename.textContent = image.filename;
-  elements.lightboxFavorite.textContent = state.favorites.has(image.id) ? "Remove Favorite" : "Favorite";
-  elements.lightboxHide.textContent = state.hidden.has(image.id) ? "Unhide from guests" : "Hide from guests";
-  elements.lightboxHide.classList.toggle("active", state.hidden.has(image.id));
+
+  const isFavorite = state.favorites.has(image.id);
+  elements.lightboxFavorite.classList.toggle("active", isFavorite);
+  elements.lightboxFavorite.title = isFavorite ? "Remove favorite" : "Add favorite";
+  elements.lightboxFavorite.setAttribute("aria-label", elements.lightboxFavorite.title);
+
+  const isHidden = state.hidden.has(image.id);
+  elements.lightboxHide.innerHTML = isHidden ? HIDDEN_ICON : HIDE_ICON;
+  elements.lightboxHide.classList.toggle("active", isHidden);
+  elements.lightboxHide.title = isHidden ? "Unhide from guests" : "Hide from guests";
+  elements.lightboxHide.setAttribute("aria-label", elements.lightboxHide.title);
+
   elements.lightboxDownload.href = image.downloadUrl;
   elements.lightboxDownload.setAttribute("download", image.filename);
 
@@ -801,6 +810,11 @@ function bindUiEvents() {
   elements.selectionCover.innerHTML = CROWN_ICON;
   elements.selectionDelete.innerHTML = TRASH_ICON;
   elements.selectionClear.innerHTML = CLOSE_ICON;
+
+  elements.lightboxFavorite.innerHTML = "&hearts;";
+  elements.lightboxHide.innerHTML = HIDE_ICON;
+  elements.lightboxRemove.innerHTML = TRASH_ICON;
+  elements.lightboxDownload.innerHTML = DOWNLOAD_ICON;
 
   elements.selectionDownload.addEventListener("click", downloadSelected);
   elements.selectionHide.addEventListener("click", hideSelected);
