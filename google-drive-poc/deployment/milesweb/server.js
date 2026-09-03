@@ -628,8 +628,8 @@ async function handleCreateEvent(request, response) {
       const protocol = isSecureRequest(request) ? "https" : "http";
       const host = request.headers.host || "localhost";
       const galleryUrl = `${protocol}://${host}${basePath}/?event=${encodeURIComponent(slug)}`;
-      const googleDriveFolderUrl = String(body.googleDriveFolderUrl || "").trim() || 
-        `https://drive.google.com/drive/folders/${encodeURIComponent(gallery.googleDriveFolderName || gallery.slug)}`;
+      const eventFolderId = await drive.resolveEventFolderId(gallery);
+      const googleDriveFolderUrl = `https://drive.google.com/drive/u/2/folders/${encodeURIComponent(eventFolderId)}`;
 
       await notifications.notifyEventCreated({
         eventName,

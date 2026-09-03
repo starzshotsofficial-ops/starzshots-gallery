@@ -160,7 +160,7 @@ function createNotificationService(configDir) {
       <p><strong>Client Code:</strong> <code>${escapeHtml(clientCode)}</code></p>
       <p><strong>Guest Code:</strong> <code>${escapeHtml(guestCode)}</code></p>
       <p><strong>Gallery URL:</strong> <a href="${escapeHtml(galleryUrl)}">${escapeHtml(galleryUrl)}</a></p>
-      <p><strong>Google Drive Folder:</strong> <a href="${escapeHtml(googleDriveFolderUrl)}">Open in Drive</a></p>
+      <p><strong>Google Drive URL (bulk download):</strong> <a href="${escapeHtml(googleDriveFolderUrl)}">${escapeHtml(googleDriveFolderUrl)}</a></p>
       <hr/>
       <p><em>This is an automated notification from Starz Shots Gallery</em></p>
     `;
