@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 /**
- * Notification service for email, SMS, and WhatsApp via Twilio and Gmail SMTP
+ * Notification service for email and WhatsApp via Gmail SMTP and CallMeBot/Twilio
  * Config file location: config/notifications.json
  * Example config structure:
  * {
@@ -15,20 +15,12 @@ const path = require("path");
  *     "user": "your-email@gmail.com",
  *     "password": "your-app-password"
  *   },
- *   "sms": {
- *     "enabled": true,
- *     "provider": "twilio",
- *     "accountSid": "your-account-sid",
- *     "authToken": "your-auth-token",
- *     "fromNumber": "+1234567890"
- *   },
  *   "whatsapp": {
  *     "enabled": true,
- *     "provider": "twilio",
- *     "accountSid": "your-account-sid",
- *     "authToken": "your-auth-token",
- *     "fromNumber": "whatsapp:+1234567890"
+ *     "provider": "callmebot",
+ *     "apikey": "your-callmebot-apikey"
  *   },
+ *   // Or use Twilio instead: { "enabled": true, "provider": "twilio", "accountSid": "...", "authToken": "...", "fromNumber": "whatsapp:+1234567890" }
  *   "adminPhone": "+919962206330",
  *   "adminEmail": "starzshotsofficial@gmail.com"
  * }
@@ -108,26 +100,29 @@ function createNotificationService(configDir) {
     }
   }
 
-  async function sendSMS(message) {
-    const cfg = loadConfig();
-    if (!cfg.enabled || !cfg.sms?.enabled || !cfg.adminPhone) return false;
+  // Free WhatsApp send via CallMeBot (https://www.callmebot.com/blog/free-api-whatsapp-messages/).
+  async function sendWhatsAppViaCallMeBot(message, cfg) {
+    const phone = cfg.whatsapp.phone || cfg.adminPhone;
+    const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(message)}&apikey=${encodeURIComponent(cfg.whatsapp.apikey)}`;
+    const response = await fetch(url);
+    const body = await response.text();
+    if (!response.ok || /error/i.test(body)) throw new Error(body || `HTTP ${response.status}`);
+    console.log(`[Notification] WhatsApp (CallMeBot) sent to ${phone}`);
+    return true;
+  }
 
-    try {
-      const tw = loadTwilio();
-      const client = tw(cfg.sms.accountSid, cfg.sms.authToken);
+  async function sendWhatsAppViaTwilio(message, cfg) {
+    const tw = loadTwilio();
+    const client = tw(cfg.whatsapp.accountSid, cfg.whatsapp.authToken);
 
-      await client.messages.create({
-        body: message,
-        from: cfg.sms.fromNumber,
-        to: cfg.adminPhone
-      });
+    await client.messages.create({
+      body: message,
+      from: cfg.whatsapp.fromNumber,
+      to: `whatsapp:${cfg.adminPhone}`
+    });
 
-      console.log(`[Notification] SMS sent to ${cfg.adminPhone}`);
-      return true;
-    } catch (error) {
-      console.error("[Notification] SMS send failed:", error.message);
-      return false;
-    }
+    console.log(`[Notification] WhatsApp (Twilio) sent to ${cfg.adminPhone}`);
+    return true;
   }
 
   async function sendWhatsApp(message) {
@@ -135,17 +130,7 @@ function createNotificationService(configDir) {
     if (!cfg.enabled || !cfg.whatsapp?.enabled || !cfg.adminPhone) return false;
 
     try {
-      const tw = loadTwilio();
-      const client = tw(cfg.whatsapp.accountSid, cfg.whatsapp.authToken);
-
-      await client.messages.create({
-        body: message,
-        from: cfg.whatsapp.fromNumber,
-        to: `whatsapp:${cfg.adminPhone}`
-      });
-
-      console.log(`[Notification] WhatsApp sent to ${cfg.adminPhone}`);
-      return true;
+      return cfg.whatsapp.provider === "callmebot" ? await sendWhatsAppViaCallMeBot(message, cfg) : await sendWhatsAppViaTwilio(message, cfg);
     } catch (error) {
       console.error("[Notification] WhatsApp send failed:", error.message);
       return false;
@@ -180,7 +165,7 @@ function createNotificationService(configDir) {
       <p><em>This is an automated notification from Starz Shots Gallery</em></p>
     `;
 
-    await Promise.all([sendEmail(`Event Created: ${eventName}`, emailBody), sendSMS(shortMessage), sendWhatsApp(shortMessage)]);
+    await Promise.all([sendEmail(`Event Created: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
   }
 
   /**
@@ -205,7 +190,7 @@ function createNotificationService(configDir) {
       <p><em>All photos are now ready for viewing.</em></p>
     `;
 
-    await Promise.all([sendEmail(`Photo Cache Complete: ${eventName}`, emailBody), sendSMS(shortMessage), sendWhatsApp(shortMessage)]);
+    await Promise.all([sendEmail(`Photo Cache Complete: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
   }
 
   /**
@@ -230,7 +215,7 @@ function createNotificationService(configDir) {
       <hr/>
     `;
 
-    await Promise.all([sendEmail(`Face Index Complete: ${eventName}`, emailBody), sendSMS(shortMessage), sendWhatsApp(shortMessage)]);
+    await Promise.all([sendEmail(`Face Index Complete: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
   }
 
   function escapeHtml(text) {
@@ -246,7 +231,6 @@ function createNotificationService(configDir) {
 
   return {
     sendEmail,
-    sendSMS,
     sendWhatsApp,
     notifyEventCreated,
     notifyPhotoCacheCompleted,

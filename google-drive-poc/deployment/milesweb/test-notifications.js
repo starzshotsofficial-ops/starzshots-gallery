@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Notifications Test Script
- * Run this to verify your email, SMS, and WhatsApp notification setup
+ * Run this to verify your email and WhatsApp notification setup
  * 
  * Usage: node test-notifications.js
  */
@@ -30,16 +30,6 @@ async function runTests() {
             <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
             <p>If you received this email, your Gmail SMTP configuration is working correctly.</p>
           `
-        );
-        return result;
-      }
-    },
-    {
-      name: 'SMS Notification',
-      fn: async () => {
-        console.log('📱 Testing SMS...');
-        const result = await notifications.sendSMS(
-          `✅ Starz Shots Gallery SMS Test - ${new Date().toLocaleTimeString()}`
         );
         return result;
       }
@@ -115,15 +105,14 @@ async function runTests() {
     console.log('✅ All tests passed! Your notifications are configured correctly.\n');
     console.log('Next steps:');
     console.log('1. Check your email (including spam folder) for the test email');
-    console.log('2. Check SMS on +919962206330');
-    console.log('3. Check WhatsApp on +919962206330');
+    console.log('2. Check WhatsApp on +919962206330');
     console.log('\nIf you received all notifications, you\'re good to go! 🎉\n');
   } else {
     console.log(`⚠️  ${failed} notification channel(s) failed.\n`);
     console.log('Troubleshooting steps:');
     console.log('1. Verify config/notifications.json has correct credentials');
     console.log('2. Check that Gmail app password is set (not regular password)');
-    console.log('3. Verify Twilio account has sufficient credit');
+    console.log('3. Verify CallMeBot apikey is correct and the admin number has opted in');
     console.log('4. Ensure phone numbers are in correct international format (+country-code-number)\n');
   }
 
