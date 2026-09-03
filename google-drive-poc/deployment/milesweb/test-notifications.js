@@ -31,6 +31,7 @@ async function runTests() {
             <p>If you received this email, your Gmail SMTP configuration is working correctly.</p>
           `
         );
+        if (!result) throw new Error('Email was not sent. Check the configuration and console output.');
         return result;
       }
     },
@@ -41,6 +42,7 @@ async function runTests() {
         const result = await notifications.sendWhatsApp(
           `✅ Starz Shots Gallery WhatsApp Test\nTime: ${new Date().toLocaleString()}`
         );
+        if (!result) throw new Error('WhatsApp message was not sent. Check the configuration and console output.');
         return result;
       }
     },
@@ -48,7 +50,7 @@ async function runTests() {
       name: 'Event Created Notification',
       fn: async () => {
         console.log('🎉 Testing Event Created Notification...');
-        const result = await notifications.notifyEventCreated({
+        const results = await notifications.notifyEventCreated({
           eventName: 'Test Wedding Event',
           eventDate: '2026-09-15',
           clientCode: 'TEST1234',
@@ -56,29 +58,32 @@ async function runTests() {
           galleryUrl: 'http://localhost:3001/?event=test-wedding',
           googleDriveFolderUrl: 'https://drive.google.com/drive/folders/test-folder-id'
         });
-        return true;
+        if (!results?.every(Boolean)) throw new Error('One or more event-created notifications were not sent.');
+        return results;
       }
     },
     {
       name: 'Photo Cache Completed Notification',
       fn: async () => {
         console.log('🖼️  Testing Photo Cache Completed Notification...');
-        const result = await notifications.notifyPhotoCacheCompleted({
+        const results = await notifications.notifyPhotoCacheCompleted({
           eventName: 'Test Wedding Event',
           photoCount: 256
         });
-        return true;
+        if (!results?.every(Boolean)) throw new Error('One or more photo-cache notifications were not sent.');
+        return results;
       }
     },
     {
       name: 'Face Index Completed Notification',
       fn: async () => {
         console.log('👤 Testing Face Index Completed Notification...');
-        const result = await notifications.notifyFaceIndexCompleted({
+        const results = await notifications.notifyFaceIndexCompleted({
           eventName: 'Test Wedding Event',
           faceCount: 42
         });
-        return true;
+        if (!results?.every(Boolean)) throw new Error('One or more face-index notifications were not sent.');
+        return results;
       }
     }
   ];

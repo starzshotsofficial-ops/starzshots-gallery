@@ -142,7 +142,7 @@ function createNotificationService(configDir) {
    */
   async function notifyEventCreated(eventData) {
     const cfg = loadConfig();
-    if (!cfg.enabled) return;
+    if (!cfg.enabled) return false;
 
     const eventName = eventData.eventName || "Unknown Event";
     const eventDate = eventData.eventDate || "N/A";
@@ -165,7 +165,7 @@ function createNotificationService(configDir) {
       <p><em>This is an automated notification from Starz Shots Gallery</em></p>
     `;
 
-    await Promise.all([sendEmail(`Event Created: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
+    return Promise.all([sendEmail(`Event Created: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
   }
 
   /**
@@ -173,7 +173,7 @@ function createNotificationService(configDir) {
    */
   async function notifyPhotoCacheCompleted(eventData) {
     const cfg = loadConfig();
-    if (!cfg.enabled) return;
+    if (!cfg.enabled) return false;
 
     const eventName = eventData.eventName || "Unknown Event";
     const photoCount = eventData.photoCount || 0;
@@ -190,7 +190,7 @@ function createNotificationService(configDir) {
       <p><em>All photos are now ready for viewing.</em></p>
     `;
 
-    await Promise.all([sendEmail(`Photo Cache Complete: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
+    return Promise.all([sendEmail(`Photo Cache Complete: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
   }
 
   /**
@@ -198,7 +198,7 @@ function createNotificationService(configDir) {
    */
   async function notifyFaceIndexCompleted(eventData) {
     const cfg = loadConfig();
-    if (!cfg.enabled) return;
+    if (!cfg.enabled) return false;
 
     const eventName = eventData.eventName || "Unknown Event";
     const faceCount = eventData.faceCount || 0;
@@ -215,7 +215,7 @@ function createNotificationService(configDir) {
       <hr/>
     `;
 
-    await Promise.all([sendEmail(`Face Index Complete: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
+    return Promise.all([sendEmail(`Face Index Complete: ${eventName}`, emailBody), sendWhatsApp(shortMessage)]);
   }
 
   function escapeHtml(text) {
