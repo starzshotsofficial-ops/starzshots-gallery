@@ -32,6 +32,7 @@ function createFaceRecognition({
   readJsonBody,
   SECURITY_HEADERS,
   logger = console,
+  onIndexComplete,
   options = {}
 }) {
   const publicDir = path.join(__dirname, "public");
@@ -48,7 +49,16 @@ function createFaceRecognition({
     minScore: options.minScore ?? 0.4,
     maxDetected: options.maxDetected ?? 100
   });
-  const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger, faceImageSize: options.faceImageSize ?? 2048 });
+  const index = createFaceIndex({
+    dataDir,
+    cache,
+    drive,
+    engine,
+    thumbnailSize,
+    logger,
+    faceImageSize: options.faceImageSize ?? 2048,
+    onBuildComplete: onIndexComplete
+  });
   const setup = createSetup({
     moduleDir: __dirname,
     modelsDir,

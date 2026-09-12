@@ -53,15 +53,17 @@ const sync = createSyncWorker({
   thumbnailSize,
   concurrency: readNumber(env, "SYNC_CONCURRENCY", 4),
   refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360),
-  onGalleryReady: async (slug) => {
-    await face.onSyncComplete(slug);
+  onGalleryReady: async (slug, syncResult) => {
+    // A scheduled Drive check finishing is not itself a cache/index event.
+    // Only new or changed gallery contents can require a face-index rebuild.
+    if (syncResult.catalogueChanged) await face.onSyncComplete(slug);
     
     // Send photo cache completion notification asynchronously
     setImmediate(async () => {
       try {
         const gallery = config.find(slug);
         const index = cache.readIndex(slug);
-        if (gallery && index) {
+        if (syncResult.didWork && gallery && index) {
           await notifications.notifyPhotoCacheCompleted({
             eventName: gallery.eventName,
             photoCount: index.totalImages || 0

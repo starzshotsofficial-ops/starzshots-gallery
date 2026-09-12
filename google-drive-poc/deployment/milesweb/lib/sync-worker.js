@@ -77,6 +77,11 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
     const gallery = config.find(slug);
     if (!gallery) return;
 
+    // Keep the previous catalogue before replacing its scene files.  The periodic
+    // refresh still checks Drive, but should not be treated as a cache event when
+    // the catalogue and thumbnail cache are already up to date.
+    const previousCatalogue = catalogueFingerprint(cache.allImages(slug));
+
     const startedAt = new Date().toISOString();
     await cache.writeSyncState(slug, { status: "listing", startedAt, totalImages: 0, cachedThumbnails: 0, error: "" });
 
@@ -111,6 +116,13 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
     }
 
     const totalImages = scenes.reduce((sum, scene) => sum + scene.count, 0);
+    const currentCatalogue = catalogueFingerprint(
+      scenes.flatMap((scene) => {
+        const sceneImages = cache.readScene(slug, scene.number);
+        return sceneImages.map((image) => ({ ...image, scene: scene.name, sceneDir: scene.dirName }));
+      })
+    );
+    const catalogueChanged = previousCatalogue !== currentCatalogue;
     await cache.writeIndex(slug, {
       slug,
       eventName: gallery.eventName,
@@ -153,7 +165,11 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
 
     if (typeof onGalleryReady === "function") {
       try {
-        onGalleryReady(slug);
+        onGalleryReady(slug, {
+          catalogueChanged,
+          thumbnailsCached: pending.length - failed,
+          didWork: catalogueChanged || pending.length > failed
+        });
       } catch (error) {
         logger.warn(`[sync] ${slug}: onGalleryReady hook failed (${error.message}).`);
       }
@@ -220,6 +236,14 @@ function createSyncWorker({ config, cache, drive, thumbnailSize, concurrency, re
   }
 
   return { enqueue, status, start };
+}
+
+/** A stable, compact representation of the files that make up a gallery. */
+function catalogueFingerprint(images) {
+  return images
+    .map((image) => `${image.scene}\u0000${image.id}\u0000${image.name || image.filename || ""}\u0000${Number(image.size || 0)}`)
+    .sort()
+    .join("\u0001");
 }
 
 function isImage(file) {

@@ -4,6 +4,7 @@ const params = new URLSearchParams(window.location.search);
 const slug = params.get("event") || "";
 const basePath = window.location.pathname.replace(/\/find-my-photos.*$/, "");
 const MAX_SELFIE_DIM = 1024;
+const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 11 4 4 4-4"/><path d="M5 21h14"/></svg>`;
 
 const state = {
   selfie: null,
@@ -227,10 +228,14 @@ function renderResults(images) {
 
     if (canDownload) {
       const download = document.createElement("a");
-      download.className = "download-button";
+      download.className = "result-download";
       download.href = image.downloadUrl;
-      download.textContent = "Download";
-      download.setAttribute("download", "");
+      download.target = "_blank";
+      download.rel = "noopener";
+      download.title = "Download photo";
+      download.setAttribute("aria-label", "Download photo");
+      download.setAttribute("download", image.filename || "");
+      download.innerHTML = DOWNLOAD_ICON;
       card.appendChild(download);
     }
 

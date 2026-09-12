@@ -16,7 +16,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 
-function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger = console, checkpointEvery = 20, faceImageSize = 1000 }) {
+function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger = console, checkpointEvery = 20, faceImageSize = 1000, onBuildComplete }) {
   const facesDir = path.join(dataDir, "faces");
   const jobs = new Map();
   const buildQueue = [];
@@ -157,6 +157,16 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger 
         `[face] index built for ${slug}: ${images.length} images, ${detected} faces, ${reused} reused, ${failures} failures.`
       );
       if (firstError) logger.error(`[face] first indexing error for ${slug}: ${firstError.message}`);
+      if (typeof onBuildComplete === "function") {
+        try {
+          await onBuildComplete(slug, {
+            completed: true,
+            faceCount: results.reduce((total, entry) => total + (entry.faces || []).length, 0)
+          });
+        } catch (error) {
+          logger.warn(`[face] completion hook failed for ${slug}: ${error.message}`);
+        }
+      }
     } catch (error) {
       job.status = "error";
       job.error = error.message;
