@@ -194,6 +194,12 @@ async function routeGallery(request, response, segments, url) {
 
   if (action === "face") return face.handleGallery(request, response, gallery, session, segments.slice(2), url);
 
+  // Friend sessions may fetch their matched image derivatives, but cannot use
+  // any endpoint that exposes or changes the browsable event gallery.
+  if (session.role === "friend" && !["face", "summary", "thumbs", "previews", "files"].includes(action)) {
+    return sendJson(response, 403, { error: "Friend access is limited to Find my photos." });
+  }
+
   if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
   if (request.method === "GET" && action === "images") return handleImages(response, gallery, url, session);
   if (request.method === "POST" && action === "images-by-id") return handleImagesById(request, response, gallery);
@@ -592,6 +598,7 @@ function toAdminEvent(gallery) {
     coverImage: gallery.coverImage || "",
     clientCode: getAccessCode(gallery, "client"),
     guestCode: getAccessCode(gallery, "guest"),
+    friendCode: getAccessCode(gallery, "friend"),
     sync: { status: state.status, queued: state.queued, cachedThumbnails: state.cachedThumbnails || 0, totalImages: state.totalImages || 0, error: state.error || "" }
   };
 }
@@ -620,6 +627,7 @@ async function handleCreateEvent(request, response) {
     coverImage: String(body.coverImage || "").trim(),
     accessCodes: createAccessCodes(clientCode, String(body.guestCode || "guest").trim() || "guest")
   });
+  setAccessCode(gallery, "friend", String(body.friendCode || "friend").trim() || "friend");
 
   sync.enqueue(slug);
 
@@ -665,6 +673,7 @@ async function handleUpdateEvent(request, response, slug) {
   }
   if (body.clientCode !== undefined) setAccessCode(gallery, "client", String(body.clientCode).trim());
   if (body.guestCode !== undefined) setAccessCode(gallery, "guest", String(body.guestCode).trim());
+  if (body.friendCode !== undefined) setAccessCode(gallery, "friend", String(body.friendCode).trim() || "friend");
 
   config.save();
   if (sourceSignature(gallery) !== before) sync.enqueue(slug);

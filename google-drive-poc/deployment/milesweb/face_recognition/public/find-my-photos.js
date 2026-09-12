@@ -45,6 +45,7 @@ async function loadSummary() {
     if (!response.ok) return;
     const summary = await response.json();
     state.permissions = summary.permissions || {};
+    el.backToGallery.classList.toggle("hidden", summary.role === "friend");
     el.eventName.textContent = summary.eventName || "Find my photos";
     el.eventMeta.textContent = summary.clientName
       ? `${summary.clientName} · upload a selfie to gather your photos.`

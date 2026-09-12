@@ -5,7 +5,10 @@ const path = require("path");
 
 const DEFAULT_PERMISSIONS = {
   client: { canFavorite: true, canDownloadSingle: true, canDownloadAll: true },
-  guest: { canFavorite: true, canDownloadSingle: true, canDownloadAll: false }
+  guest: { canFavorite: true, canDownloadSingle: true, canDownloadAll: false },
+  // Friends can only use face search. Matched photos are displayed by that page,
+  // but they cannot browse, favourite, or download the event gallery.
+  friend: { canFavorite: false, canDownloadSingle: false, canDownloadAll: false }
 };
 
 function createConfigStore(filePath) {
@@ -58,23 +61,53 @@ function readConfig(filePath) {
 function createAccessCodes(clientCode, guestCode) {
   return [
     { label: "Client", code: clientCode, role: "client", permissions: { ...DEFAULT_PERMISSIONS.client } },
-    { label: "Guest", code: guestCode, role: "guest", permissions: { ...DEFAULT_PERMISSIONS.guest } }
+    { label: "Guest", code: guestCode, role: "guest", permissions: { ...DEFAULT_PERMISSIONS.guest } },
+    { label: "Friend", code: "friend", role: "friend", permissions: { ...DEFAULT_PERMISSIONS.friend } }
   ];
 }
 
 function getAccessCode(gallery, role) {
-  return (gallery.accessCodes || []).find((entry) => entry.role === role)?.code || "";
+  const configured = (gallery.accessCodes || []).find((entry) => entry.role === role)?.code;
+  // Existing events created before Friend access was introduced should be able
+  // to use the same default immediately; saving the event persists the entry.
+  return configured || (role === "friend" ? "friend" : "");
 }
 
 function setAccessCode(gallery, role, code) {
-  const entry = (gallery.accessCodes || []).find((item) => item.role === role);
-  if (entry) entry.code = code;
+  gallery.accessCodes = Array.isArray(gallery.accessCodes) ? gallery.accessCodes : [];
+  // Friend is a real access profile, not an optional blank field. This also
+  // repairs older event records if Admin saves a row with the field cleared.
+  const normalizedCode = String(code || "").trim() || (role === "friend" ? "friend" : "");
+  const entry = gallery.accessCodes.find((item) => item.role === role);
+  if (entry) {
+    entry.code = normalizedCode;
+    entry.label = entry.label || role[0].toUpperCase() + role.slice(1);
+    entry.permissions = entry.permissions || { ...(DEFAULT_PERMISSIONS[role] || {}) };
+    return;
+  }
+
+  if (DEFAULT_PERMISSIONS[role]) {
+    gallery.accessCodes.push({
+      label: role[0].toUpperCase() + role.slice(1),
+      code: normalizedCode,
+      role,
+      permissions: { ...DEFAULT_PERMISSIONS[role] }
+    });
+  }
 }
 
 function matchAccessCode(gallery, code) {
   const normalized = String(code || "").trim().toLowerCase();
   if (!normalized) return null;
-  return (gallery.accessCodes || []).find((entry) => String(entry.code || "").trim().toLowerCase() === normalized) || null;
+  const matched = (gallery.accessCodes || []).find((entry) => String(entry.code || "").trim().toLowerCase() === normalized);
+  if (matched) return matched;
+
+  // Backward compatibility for events saved before the Friend profile existed.
+  const friendEntry = (gallery.accessCodes || []).find((entry) => entry.role === "friend");
+  if (normalized === "friend" && !String(friendEntry?.code || "").trim()) {
+    return { label: "Friend", code: "friend", role: "friend", permissions: { ...DEFAULT_PERMISSIONS.friend } };
+  }
+  return null;
 }
 
 function toSlug(value) {

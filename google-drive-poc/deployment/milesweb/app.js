@@ -137,6 +137,7 @@ async function handleAccessFormSubmit(event) {
 
 async function openGallery() {
   state.summary = await (await apiFetch("/summary")).json();
+  const isFriend = state.role === "friend";
 
   elements.accessView.classList.add("hidden");
   elements.galleryView.classList.remove("hidden");
@@ -148,13 +149,27 @@ async function openGallery() {
   elements.eventName.textContent = state.summary.eventName;
   elements.eventDate.textContent = formatDate(state.summary.eventDate);
   elements.clientName.textContent = state.summary.clientName;
-  elements.visitorRole.textContent = `${state.role === "client" ? "Client" : "Guest"}: ${state.viewerLabel}`;
+  elements.visitorRole.textContent = `${state.role === "client" ? "Client" : state.role === "friend" ? "Friend" : "Guest"}: ${state.viewerLabel}`;
 
   if (elements.findMyPhotos) {
     elements.findMyPhotos.href = `${basePath}/find-my-photos?event=${encodeURIComponent(gallerySlug)}`;
   }
 
   applyPermissions();
+
+  // Friends can see the event cover and continue to selfie search, but never a
+  // gallery grid. The server also rejects gallery-listing APIs for this role.
+  elements.sceneTabs.classList.toggle("hidden", isFriend);
+  elements.showAll.classList.toggle("hidden", isFriend);
+  elements.galleryGrid.classList.toggle("hidden", isFriend);
+  elements.gridSentinel.classList.toggle("hidden", isFriend);
+  if (isFriend) {
+    elements.syncNotice.classList.add("hidden");
+    elements.gridStatus.textContent = "Use Find my photos to search the gallery with a selfie.";
+    scrollToGalleryTop();
+    return;
+  }
+
   renderSyncNotice();
   renderScenes();
   await loadFavorites();

@@ -85,7 +85,8 @@ function createEventRow(event) {
     googleDriveFolderName: createCell("text", event.googleDriveFolderName),
     sceneFolderNames: createCell("text", (event.sceneFolderNames || []).join(", ")),
     clientCode: createCell("text", event.clientCode),
-    guestCode: createCell("text", event.guestCode)
+    guestCode: createCell("text", event.guestCode),
+    friendCode: createCell("text", event.friendCode || "friend")
   };
 
   Object.values(fields).forEach(({ cell }) => row.append(cell));
@@ -129,7 +130,8 @@ function createEventRow(event) {
       googleDriveFolderName: fields.googleDriveFolderName.input.value.trim(),
       sceneFolderNames: fields.sceneFolderNames.input.value.split(",").map((name) => name.trim()).filter(Boolean),
       clientCode: fields.clientCode.input.value.trim(),
-      guestCode: fields.guestCode.input.value.trim()
+      guestCode: fields.guestCode.input.value.trim(),
+      friendCode: fields.friendCode.input.value.trim()
     };
 
     try {
@@ -146,6 +148,9 @@ function createEventRow(event) {
 
       status.textContent = "Saved.";
       status.classList.add("success");
+      // Reload immediately so the table reflects the server's persisted Friend
+      // code instead of waiting for the background polling interval.
+      void loadEvents();
     } catch (error) {
       status.textContent = error.message || "Unable to save event.";
       status.classList.add("error");
@@ -297,7 +302,8 @@ async function handleCreateSubmit(event) {
     googleDriveFolderName: String(form.get("googleDriveFolderName") || "").trim(),
     sceneFolderNames: String(form.get("sceneFolderNames") || "").split(",").map((name) => name.trim()).filter(Boolean),
     clientCode: String(form.get("clientCode") || "").trim(),
-    guestCode: String(form.get("guestCode") || "").trim()
+    guestCode: String(form.get("guestCode") || "").trim(),
+    friendCode: String(form.get("friendCode") || "").trim()
   };
 
   try {
@@ -313,6 +319,7 @@ async function handleCreateSubmit(event) {
     elements.createSuccess.textContent = `Created '${payload.event.eventName}'. The thumbnail cache job has been queued.`;
     elements.createForm.reset();
     elements.createForm.guestCode.value = "guest";
+    elements.createForm.friendCode.value = "friend";
     void loadEvents();
   } catch (error) {
     elements.createError.textContent = error.message || "Unable to create event.";
