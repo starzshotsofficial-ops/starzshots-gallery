@@ -635,6 +635,7 @@ async function handleCreateEvent(request, response) {
   setImmediate(async () => {
     try {
       const guestCode = getAccessCode(gallery, "guest");
+      const friendCode = getAccessCode(gallery, "friend");
       const protocol = isSecureRequest(request) ? "https" : "http";
       const host = request.headers.host || "localhost";
       const galleryUrl = `${protocol}://${host}${basePath}/?event=${encodeURIComponent(slug)}`;
@@ -646,6 +647,7 @@ async function handleCreateEvent(request, response) {
         eventDate: gallery.eventDate,
         clientCode,
         guestCode,
+        friendCode,
         galleryUrl,
         googleDriveFolderUrl
       });

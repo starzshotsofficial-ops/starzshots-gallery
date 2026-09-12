@@ -148,10 +148,11 @@ function createNotificationService(configDir) {
     const eventDate = eventData.eventDate || "N/A";
     const clientCode = eventData.clientCode || "N/A";
     const guestCode = eventData.guestCode || "N/A";
+    const friendCode = eventData.friendCode || "N/A";
     const galleryUrl = eventData.galleryUrl || "N/A";
     const googleDriveFolderUrl = eventData.googleDriveFolderUrl || "N/A";
 
-    const shortMessage = `Event Created: ${eventName} (${eventDate})\nClient: ${clientCode} | Guest: ${guestCode}\nGallery: ${galleryUrl}`;
+    const shortMessage = `Event Created: ${eventName} (${eventDate})\nClient: ${clientCode} | Guest: ${guestCode} | Friend: ${friendCode}\nGallery: ${galleryUrl}`;
 
     const emailBody = `
       <h2>📸 Event Created Successfully</h2>
@@ -159,6 +160,7 @@ function createNotificationService(configDir) {
       <p><strong>Event Date:</strong> ${escapeHtml(eventDate)}</p>
       <p><strong>Client Code:</strong> <code>${escapeHtml(clientCode)}</code></p>
       <p><strong>Guest Code:</strong> <code>${escapeHtml(guestCode)}</code></p>
+      <p><strong>Friend Code (Find my photos only):</strong> <code>${escapeHtml(friendCode)}</code></p>
       <p><strong>Gallery URL:</strong> <a href="${escapeHtml(galleryUrl)}">${escapeHtml(galleryUrl)}</a></p>
       <p><strong>Google Drive URL (bulk download):</strong> <a href="${escapeHtml(googleDriveFolderUrl)}">${escapeHtml(googleDriveFolderUrl)}</a></p>
       <hr/>

@@ -55,6 +55,7 @@ async function runTests() {
           eventDate: '2026-09-15',
           clientCode: 'TEST1234',
           guestCode: 'guest',
+          friendCode: 'friend',
           galleryUrl: 'http://localhost:3001/?event=test-wedding',
           googleDriveFolderUrl: 'https://drive.google.com/drive/folders/test-folder-id'
         });
