@@ -317,7 +317,48 @@ function appendTiles(images) {
   });
 
   elements.galleryGrid.append(fragment);
+  layoutGalleryGrid();
 }
+
+function galleryColumnCount() {
+  if (window.matchMedia("(max-width: 760px)").matches) return 2;
+  if (window.matchMedia("(max-width: 1100px)").matches) return 3;
+  return 4;
+}
+
+function layoutGalleryGrid() {
+  const tiles = [...elements.galleryGrid.querySelectorAll(".photo-tile")];
+  if (!tiles.length) {
+    elements.galleryGrid.style.height = "0px";
+    return;
+  }
+
+  const styles = getComputedStyle(elements.galleryGrid);
+  const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+  const paddingRight = parseFloat(styles.paddingRight) || 0;
+  const gap = parseFloat(styles.columnGap) || (window.matchMedia("(max-width: 760px)").matches ? 8 : 12);
+  const columnCount = galleryColumnCount();
+  const contentWidth = elements.galleryGrid.clientWidth - paddingLeft - paddingRight;
+  const columnWidth = (contentWidth - gap * (columnCount - 1)) / columnCount;
+  const columnHeights = Array(columnCount).fill(0);
+
+  tiles.forEach((tile) => {
+    const image = tile.querySelector("img");
+    const column = columnHeights.indexOf(Math.min(...columnHeights));
+    const left = paddingLeft + column * (columnWidth + gap);
+    const top = paddingLeft + columnHeights[column];
+
+    tile.style.width = `${columnWidth}px`;
+    tile.style.transform = `translate(${left}px, ${top}px)`;
+
+    const tileHeight = image?.complete && image.naturalWidth ? tile.offsetHeight : columnWidth;
+    columnHeights[column] += tileHeight + gap;
+  });
+
+  elements.galleryGrid.style.height = `${Math.max(...columnHeights) - gap + paddingLeft}px`;
+}
+
+window.addEventListener("resize", layoutGalleryGrid);
 
 function createTile(image, index) {
   const isClient = state.role === "client";
@@ -332,6 +373,7 @@ function createTile(image, index) {
   img.alt = image.filename;
   img.loading = "lazy";
   img.decoding = "async";
+  img.addEventListener("load", layoutGalleryGrid);
   // Once a selection is in progress, tapping a photo extends the selection instead of opening it.
   img.addEventListener("click", () => {
     if (isClient && state.selected.size) toggleSelect(image.id);

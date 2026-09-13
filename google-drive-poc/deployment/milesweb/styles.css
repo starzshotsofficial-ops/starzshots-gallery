@@ -260,15 +260,16 @@ button {
 }
 
 .gallery-grid {
-  column-count: 4;
-  column-gap: 0.75rem;
+  position: relative;
   padding: 0.75rem;
 }
 
 .photo-tile {
-  position: relative;
-  break-inside: avoid;
-  margin: 0 0 0.75rem;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  margin: 0;
   overflow: hidden;
   border-radius: 6px;
   background: #e9e3d8;

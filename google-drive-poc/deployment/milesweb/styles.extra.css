@@ -346,17 +346,19 @@
 }
 
 /* Responsive columns + toolbar for tablets and phones. */
-@media (max-width: 1100px) {
-  .gallery-grid {
-    column-count: 3;
-  }
-}
-
 @media (max-width: 760px) {
   .gallery-grid {
-    column-count: 2;
-    column-gap: 0.5rem;
     padding: 0.5rem;
+  }
+
+  .hero {
+    min-height: 0;
+  }
+
+  .hero img {
+    height: auto;
+    min-height: 0;
+    object-fit: contain;
   }
 
   .toolbar {
