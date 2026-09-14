@@ -352,12 +352,12 @@
   }
 
   .hero {
-    min-height: 0;
+    min-height: 68vh;
   }
 
   .hero img {
-    height: auto;
-    min-height: 0;
+    height: 100%;
+    min-height: 68vh;
     object-fit: contain;
   }
 
@@ -380,7 +380,9 @@
   }
 
   .role-badge {
+    align-self: flex-start;
     max-width: 100%;
+    flex-shrink: 0;
   }
 }
 
