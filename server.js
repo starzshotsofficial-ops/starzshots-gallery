@@ -3,9 +3,10 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { pipeline } = require("stream/promises");
+const sharp = require("sharp");
 
 const rootDir = __dirname;
-const port = Number(process.env.PORT || 3001);
+const port = Number(process.env.PORT || 3000);
 // Merge .env (local dev) with process.env, which takes precedence (Render/host-provided vars)
 const env = { ...loadEnv(path.join(rootDir, ".env")), ...process.env };
 const galleriesConfigPath = path.join(rootDir, "config", "galleries.json");
@@ -18,6 +19,7 @@ const spacebyteAuthScheme = String(env.SPACEBYTE_AUTH_SCHEME || "Bearer").trim()
 const adminToken = env.ADMIN_TOKEN || "";
 const allowInsecureTls = String(env.SPACEBYTE_ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
+const supportedImageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const galleryHydrationCache = new Map();
 const galleryCacheTtlMs = 10 * 60 * 1000;
 
@@ -75,6 +77,11 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/admin/spacebyte-status") {
       if (!authorizeAdmin(request, response)) return;
       await handleSpaceByteStatus(response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/home-photos") {
+      handleHomePhotosRequest(response);
       return;
     }
 
@@ -141,9 +148,19 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, () => {
+async function startServer() {
   ensureFavoritesStore();
-  console.log(`Starz Shots Gallery running at http://localhost:${port}`);
+  await optimizeHomePhotos();
+  await optimizeAssetImages();
+  watchHomePhotos();
+  server.listen(port, () => {
+    console.log(`Starz Shots Gallery running at http://localhost:${port}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error(`Starz Shots Gallery could not start: ${error.message}`);
+  process.exitCode = 1;
 });
 
 async function handleCreateAdminEvent(request, response) {
@@ -1039,6 +1056,96 @@ function readJsonBody(request) {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload));
+}
+
+function handleHomePhotosRequest(response) {
+  const photosDir = path.join(rootDir, "photos");
+  const supportedExtensions = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+  try {
+    const photos = fs.readdirSync(photosDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && supportedExtensions.has(path.extname(entry.name).toLowerCase()))
+      .map((entry) => `/photos/${encodeURIComponent(entry.name)}`);
+
+    sendJson(response, 200, { photos });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      sendJson(response, 200, { photos: [] });
+      return;
+    }
+    sendJson(response, 500, { error: "Portfolio photos could not be loaded." });
+  }
+}
+
+let photoOptimizationTimer;
+let photoOptimizationPromise = Promise.resolve();
+
+async function optimizeHomePhotos() {
+  const photosDir = path.join(rootDir, "photos");
+  fs.mkdirSync(photosDir, { recursive: true });
+  await optimizeImageDirectory(photosDir, { maxDimension: 1800, label: "homepage photo" });
+}
+
+async function optimizeAssetImages() {
+  const assetsDir = path.join(rootDir, "assets");
+  await optimizeImageFile(path.join(assetsDir, "black.png"), { maxDimension: 512, label: "logo asset" });
+  await optimizeImageFile(path.join(assetsDir, "STZ_2628.jpg"), { maxDimension: 1200, label: "portrait asset" });
+}
+
+async function optimizeImageDirectory(directory, options) {
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !supportedImageExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+    await optimizeImageFile(path.join(directory, entry.name), options);
+  }
+}
+
+async function optimizeImageFile(filePath, { maxDimension, label }) {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return;
+
+  try {
+    const metadata = await sharp(filePath).metadata();
+    const fileSize = fs.statSync(filePath).size;
+    const needsOptimization = fileSize > 700 * 1024
+      || Math.max(metadata.width || 0, metadata.height || 0) > maxDimension
+      || (metadata.orientation && metadata.orientation !== 1);
+
+    if (!needsOptimization) return;
+
+    const temporaryPath = `${filePath}.optimized`;
+    const image = sharp(filePath)
+      .rotate()
+      .resize({ width: maxDimension, height: maxDimension, fit: "inside", withoutEnlargement: true });
+
+    if (metadata.format === "png") {
+      await image.png({ compressionLevel: 9 }).toFile(temporaryPath);
+    } else if (metadata.format === "webp") {
+      await image.webp({ quality: 82 }).toFile(temporaryPath);
+    } else {
+      await image.jpeg({ quality: 82, progressive: true }).toFile(temporaryPath);
+    }
+
+    fs.rmSync(filePath);
+    fs.renameSync(temporaryPath, filePath);
+    console.log(`Optimized ${label}: ${path.basename(filePath)}`);
+  } catch (error) {
+    const temporaryPath = `${filePath}.optimized`;
+    if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath);
+    console.error(`Could not optimize ${label} '${path.basename(filePath)}': ${error.message}`);
+  }
+}
+
+function watchHomePhotos() {
+  const photosDir = path.join(rootDir, "photos");
+  fs.watch(photosDir, { persistent: false }, (eventType, filename) => {
+    if (!filename || !supportedImageExtensions.has(path.extname(filename).toLowerCase())) return;
+    clearTimeout(photoOptimizationTimer);
+    photoOptimizationTimer = setTimeout(() => {
+      photoOptimizationPromise = photoOptimizationPromise
+        .then(() => optimizeHomePhotos())
+        .catch((error) => console.error(`Could not scan homepage photos: ${error.message}`));
+    }, 300);
+  });
 }
 
 function serveStatic(urlPath, response) {

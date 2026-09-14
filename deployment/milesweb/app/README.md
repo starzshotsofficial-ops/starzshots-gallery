@@ -61,11 +61,14 @@ endpoint requires it and only serves file hashes belonging to that event.
 
 ## Deploy on MilesWeb
 
-1. In **Setup Node.js App**, create the app with Node.js 18+, application root
-   `public_html/gallery`, application URL `/gallery`, startup file `server.js`.
+1. In **Setup Node.js App**, create the app with an available Node.js LTS
+   release (Node 20 or 22 is recommended; avoid an unsupported custom version
+   such as 26.8.2), application root `public_html/gallery`, application URL
+   `/gallery`, startup file `server.js`.
 2. Set the proxy **Port** and add `PORT` to the environment with the same value
    (defaults to 3001). The app binds to `0.0.0.0` on that port.
-3. Run `npm install` from the application root — this compiles `sharp`.
+3. Run `npm install` once from the application root — this installs the locked
+   dependencies, including the native `sharp` package.
 4. Add the environment variables from `.env.example` (do not upload `.env`).
 5. Restart, then confirm `https://YOUR-DOMAIN/gallery/healthz` → `{"ok":true}`.
 
