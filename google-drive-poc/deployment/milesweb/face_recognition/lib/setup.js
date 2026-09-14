@@ -2,11 +2,11 @@
 
 /**
  * Runtime auto-setup so the feature works from a plain `npm start` with no manual
- * `npm install` / `npm run setup`. On first start (when needed) it:
- *   1. installs @vladmandic/face-api + jpeg-js into face_recognition/node_modules
- *   2. downloads the model weights into face_recognition/models
- * Both run in the background and are guarded so concurrent Passenger workers don't
- * install twice. When everything is already present this is a fast no-op.
+ * `npm install`. On first start (when needed) it:
+ *   1. installs @vladmandic/human + jpeg-js into face_recognition/node_modules
+ *   2. downloads the model weights into face_recognition/models (once, then loaded
+ *      from local disk on every subsequent boot — no CDN dependency at runtime)
+ * The install is guarded so concurrent Passenger workers don't install twice.
  */
 
 const fs = require("fs");
@@ -25,14 +25,29 @@ function createSetup({ moduleDir, modelsDir, logger = console, autoInstall = tru
   let running = null;
   let cooldownUntil = 0;
 
-  function depsInstalled() {
+  // Returns the list of missing/unresolvable dependencies (empty = all present).
+  function missingDeps() {
+    const missing = [];
     try {
-      require.resolve("@vladmandic/face-api");
-      require.resolve("jpeg-js");
-      return true;
-    } catch {
-      return false;
+      // Resolve the bare package (allowed by exports), then check the node-wasm build's presence.
+      const mainEntry = require.resolve("@vladmandic/human");
+      const wasmEntry = path.join(path.dirname(mainEntry), "human.node-wasm.js");
+      if (!fs.existsSync(wasmEntry)) missing.push(`human.node-wasm.js (missing at ${wasmEntry})`);
+    } catch (error) {
+      missing.push(`@vladmandic/human (${error.code || error.message})`);
     }
+    for (const dep of ["@tensorflow/tfjs", "@tensorflow/tfjs-backend-wasm", "jpeg-js"]) {
+      try {
+        require.resolve(dep);
+      } catch (error) {
+        missing.push(`${dep} (${error.code || error.message})`);
+      }
+    }
+    return missing;
+  }
+
+  function depsInstalled() {
+    return missingDeps().length === 0;
   }
 
   function ready() {
@@ -76,12 +91,14 @@ function createSetup({ moduleDir, modelsDir, logger = console, autoInstall = tru
   function installDeps() {
     return new Promise((resolve) => {
       state.deps = "installing";
-      logger.log("[face] installing face-recognition dependencies (one-time)…");
+      logger.log(`[face] installing dependencies (one-time) in ${moduleDir} …`);
+      let output = "";
       const child = spawn("npm", ["install", "--no-audit", "--no-fund", "--omit=dev"], {
         cwd: moduleDir,
-        stdio: "ignore",
         shell: true
       });
+      if (child.stdout) child.stdout.on("data", (chunk) => { output += chunk; });
+      if (child.stderr) child.stderr.on("data", (chunk) => { output += chunk; });
       child.on("error", (error) => {
         state.deps = "error";
         state.error = `Could not auto-install face packages (${error.message}). Run 'npm install' inside face_recognition once.`;
@@ -89,14 +106,16 @@ function createSetup({ moduleDir, modelsDir, logger = console, autoInstall = tru
         resolve(false);
       });
       child.on("close", (code) => {
-        if (code === 0 && depsInstalled()) {
+        const missing = missingDeps();
+        if (code === 0 && missing.length === 0) {
           state.deps = "ready";
           logger.log("[face] dependencies installed.");
           resolve(true);
         } else {
           state.deps = "error";
-          state.error = `npm install exited with code ${code}. Run 'npm install' inside face_recognition once.`;
+          state.error = `npm install exited with code ${code}; still missing: ${missing.join(", ") || "none"}`;
           logger.error(`[face] ${state.error}`);
+          logger.error(`[face] npm output (tail):\n${output.slice(-3000)}`);
           resolve(false);
         }
       });
@@ -124,6 +143,7 @@ function createSetup({ moduleDir, modelsDir, logger = console, autoInstall = tru
       state.models = "ready";
       return Promise.resolve(true);
     }
+    logger.log(`[face] not ready yet; missing: ${missingDeps().join(", ") || "none"}`);
     if (running) return running;
     if (Date.now() < cooldownUntil) return Promise.resolve(false);
 

@@ -3,7 +3,8 @@
 const params = new URLSearchParams(window.location.search);
 const slug = params.get("event") || "";
 const basePath = window.location.pathname.replace(/\/find-my-photos.*$/, "");
-const MAX_SELFIE_DIM = 720;
+const MAX_SELFIE_DIM = 1024;
+const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m8 11 4 4 4-4"/><path d="M5 21h14"/></svg>`;
 
 const state = {
   selfie: null,
@@ -44,6 +45,7 @@ async function loadSummary() {
     if (!response.ok) return;
     const summary = await response.json();
     state.permissions = summary.permissions || {};
+    el.backToGallery.classList.toggle("hidden", summary.role === "friend");
     el.eventName.textContent = summary.eventName || "Find my photos";
     el.eventMeta.textContent = summary.clientName
       ? `${summary.clientName} · upload a selfie to gather your photos.`
@@ -53,36 +55,63 @@ async function loadSummary() {
   }
 }
 
-function handleSelfieChange(event) {
+async function handleSelfieChange(event) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
-  setStatus("");
+  setStatus("Preparing your photo…");
 
-  const reader = new FileReader();
-  reader.onload = () => downscaleToJpeg(reader.result);
-  reader.onerror = () => setStatus("That file could not be read. Please try another photo.", true);
-  reader.readAsDataURL(file);
+  try {
+    await prepareSelfie(file);
+    setStatus("");
+  } catch {
+    setStatus("That image could not be opened. Please try another photo (JPG or PNG).", true);
+  }
 }
 
-function downscaleToJpeg(dataUrl) {
-  const image = new Image();
-  image.onload = () => {
-    const scale = Math.min(1, MAX_SELFIE_DIM / Math.max(image.width, image.height));
-    const width = Math.round(image.width * scale);
-    const height = Math.round(image.height * scale);
+// Downscales any-size camera photo in the browser so the upload stays small and
+// the server always receives a bounded JPEG. Uses createImageBitmap (memory-friendly
+// for huge files + applies EXIF orientation) with an <img> fallback.
+async function prepareSelfie(file) {
+  const source = await loadBitmap(file);
+  const naturalWidth = source.width || source.naturalWidth;
+  const naturalHeight = source.height || source.naturalHeight;
+  const scale = Math.min(1, MAX_SELFIE_DIM / Math.max(naturalWidth, naturalHeight));
+  const width = Math.round(naturalWidth * scale);
+  const height = Math.round(naturalHeight * scale);
 
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+  if (typeof source.close === "function") source.close();
 
-    state.selfie = canvas.toDataURL("image/jpeg", 0.9);
-    el.preview.style.backgroundImage = `url("${state.selfie}")`;
-    el.preview.classList.add("has-image");
-    el.searchButton.disabled = false;
-  };
-  image.onerror = () => setStatus("That image could not be opened. Please try another photo.", true);
-  image.src = dataUrl;
+  state.selfie = canvas.toDataURL("image/jpeg", 0.9);
+  el.preview.style.backgroundImage = `url("${state.selfie}")`;
+  el.preview.classList.add("has-image");
+  el.searchButton.disabled = false;
+}
+
+function loadBitmap(file) {
+  if (typeof createImageBitmap === "function") {
+    return createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => loadViaImage(file));
+  }
+  return loadViaImage(file);
+}
+
+function loadViaImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("decode failed"));
+    };
+    image.src = url;
+  });
 }
 
 async function runSearch() {
@@ -200,10 +229,14 @@ function renderResults(images) {
 
     if (canDownload) {
       const download = document.createElement("a");
-      download.className = "download-button";
+      download.className = "result-download";
       download.href = image.downloadUrl;
-      download.textContent = "Download";
-      download.setAttribute("download", "");
+      download.target = "_blank";
+      download.rel = "noopener";
+      download.title = "Download photo";
+      download.setAttribute("aria-label", "Download photo");
+      download.setAttribute("download", image.filename || "");
+      download.innerHTML = DOWNLOAD_ICON;
       card.appendChild(download);
     }
 

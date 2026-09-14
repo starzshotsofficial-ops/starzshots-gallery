@@ -45,9 +45,7 @@
         <div class="scene-tabs" id="sceneTabs"></div>
         <div class="actions">
           <button type="button" id="showAll" class="tab active">All</button>
-          <button type="button" id="showFavorites" class="tab">Favorites</button>
-          <span id="favoriteCount" class="role-badge">0</span>
-          <button type="button" id="downloadAll" class="icon-button">Download all</button>
+          <button type="button" id="showFavorites" class="tab">Favorites (0)</button>
           <button type="button" id="downloadFavoritesCsv" class="icon-button">Download favorites</button>
           <a id="findMyPhotos" class="icon-button" href="#">Find my photos</a>
         </div>
@@ -57,6 +55,16 @@
       <div id="gridSentinel" class="grid-sentinel"></div>
       <p id="gridStatus" class="grid-status muted"></p>
     </section>
+
+    <div id="selectionBar" class="selection-bar hidden" role="toolbar" aria-label="Selected photo actions">
+      <span class="selection-count"><b id="selectionCount">0</b> selected</span>
+      <button type="button" id="selectionClear" class="selection-clear" title="Clear selection" aria-label="Clear selection"></button>
+      <span class="selection-divider" aria-hidden="true"></span>
+      <button type="button" id="selectionDownload" class="selection-action" title="Download" aria-label="Download"></button>
+      <button type="button" id="selectionHide" class="selection-action" title="Hide from guests" aria-label="Hide from guests"></button>
+      <button type="button" id="selectionCover" class="selection-action hidden" title="Set as cover photo" aria-label="Set as cover photo"></button>
+      <button type="button" id="selectionDelete" class="selection-action danger" title="Delete" aria-label="Delete"></button>
+    </div>
   </main>
 
   <dialog id="lightbox">
@@ -70,19 +78,12 @@
         <p id="lightboxFilename" class="muted">Filename</p>
       </div>
       <div class="dialog-actions">
-        <button id="lightboxFavorite" type="button">Favorite</button>
-        <a id="lightboxDownload" class="download-button" target="_blank" rel="noopener" download>Download</a>
+        <button id="lightboxFavorite" type="button" title="Favorite" aria-label="Favorite"></button>
+        <button id="lightboxHide" type="button" class="hidden" title="Hide from guests" aria-label="Hide from guests"></button>
+        <button id="lightboxRemove" type="button" title="Remove photo" aria-label="Remove photo"></button>
+        <a id="lightboxDownload" class="download-button" target="_blank" rel="noopener" download title="Download photo" aria-label="Download photo"></a>
       </div>
     </footer>
-  </dialog>
-
-  <dialog id="downloadDialog" class="download-dialog">
-    <h2>Download all photos</h2>
-    <p class="muted">Large galleries are split into parts so each download stays reliable. Start one part at a time.</p>
-    <div id="downloadParts" class="download-parts"></div>
-    <div class="dialog-actions">
-      <button id="closeDownloadDialog" type="button">Close</button>
-    </div>
   </dialog>
 
   <script src="app.js"></script>

@@ -13,11 +13,13 @@ const { createConfigStore, createAccessCodes, getAccessCode, setAccessCode, matc
 const { createDriveClient } = require("./lib/drive-client");
 const { createGalleryCache } = require("./lib/gallery-cache");
 const { createFavoritesStore } = require("./lib/favorites-store");
+const { createHiddenPhotosStore } = require("./lib/hidden-photos-store");
 const { createSyncWorker } = require("./lib/sync-worker");
 const { createSessionManager, timingSafeEqual } = require("./lib/session");
 const { ZipWriter } = require("./lib/zip-writer");
 const { sendJson, serveStatic, readJsonBody, SECURITY_HEADERS } = require("./lib/http-utils");
 const { createFaceRecognition } = require("./face_recognition");
+const { createNotificationService } = require("./lib/notifications");
 
 const rootDir = __dirname;
 const env = { ...loadEnvFile(path.join(rootDir, ".env")), ...process.env };
@@ -37,6 +39,8 @@ const maxPageSize = 120;
 const config = createConfigStore(path.join(rootDir, "config", "galleries.json"));
 const cache = createGalleryCache(dataDir);
 const favorites = createFavoritesStore(dataDir);
+const hidden = createHiddenPhotosStore(dataDir);
+const notifications = createNotificationService(path.join(rootDir, "config"));
 const drive = createDriveClient({
   env,
   allowInsecureTls: readBoolean(env, "GOOGLE_DRIVE_ALLOW_INSECURE_TLS", false),
@@ -49,7 +53,28 @@ const sync = createSyncWorker({
   thumbnailSize,
   concurrency: readNumber(env, "SYNC_CONCURRENCY", 4),
   refreshMinutes: readNumber(env, "SYNC_REFRESH_MINUTES", 360),
-  onGalleryReady: (slug) => face.onSyncComplete(slug)
+  onGalleryReady: async (slug, syncResult) => {
+    // A scheduled Drive check finishing is not itself a cache/index event.
+    // Only new or changed gallery contents can require a face-index rebuild.
+    if (syncResult.catalogueChanged) await face.onSyncComplete(slug);
+    
+    // Send photo cache completion notification asynchronously
+    setImmediate(async () => {
+      try {
+        const gallery = config.find(slug);
+        const index = cache.readIndex(slug);
+        if (syncResult.didWork && gallery && index) {
+          await notifications.notifyPhotoCacheCompleted({
+            eventName: gallery.eventName,
+            photoCount: index.totalImages || 0
+          });
+          console.log(`[Notifications] Photo cache notification sent for gallery: ${slug}`);
+        }
+      } catch (error) {
+        console.error(`[Notifications] Failed to send photo cache notification:`, error.message);
+      }
+    });
+  }
 });
 const sessions = createSessionManager({
   secret: resolveSessionSecret(),
@@ -64,13 +89,38 @@ const face = createFaceRecognition({
   config,
   dataDir,
   basePath,
+  port,
   thumbnailSize,
   sendJson,
   readJsonBody,
   SECURITY_HEADERS,
+  onIndexComplete: async (slug, status) => {
+    // Send face index completion notification asynchronously
+    setImmediate(async () => {
+      try {
+        const gallery = config.find(slug);
+        if (gallery && status?.completed) {
+          await notifications.notifyFaceIndexCompleted({
+            eventName: gallery.eventName,
+            faceCount: status.faceCount || 0
+          });
+          console.log(`[Notifications] Face index notification sent for gallery: ${slug}`);
+        }
+      } catch (error) {
+        console.error(`[Notifications] Failed to send face index notification:`, error.message);
+      }
+    });
+  },
   options: {
-    detector: readString(env, "FACE_DETECTOR", "tiny"),
-    matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.5")) || 0.5
+    matchThreshold: Number(readString(env, "FACE_MATCH_THRESHOLD", "0.4")) || 0.4,
+    faceImageSize: readNumber(env, "FACE_IMAGE_SIZE", 2048),
+    minFaceSize: readNumber(env, "FACE_MIN_FACE_SIZE", 34),
+    minScore: Number(readString(env, "FACE_MIN_SCORE", "0.4")) || 0.4,
+    maxDetected: readNumber(env, "FACE_MAX_DETECTED", 100),
+    // Empty by default: index.js points these at the locally downloaded models/wasm files.
+    // Only set FACE_MODEL_BASE_PATH / FACE_WASM_PATH to force a CDN instead.
+    modelBasePath: readString(env, "FACE_MODEL_BASE_PATH", ""),
+    wasmPath: readString(env, "FACE_WASM_PATH", "")
   }
 });
 
@@ -107,6 +157,10 @@ async function route(request, response) {
     return face.handlePage(request, response, url);
   }
 
+  if (request.method === "GET" && segments[0] === "face-models") {
+    return face.handleModelFile(response, decodeURIComponent(segments[1] || ""));
+  }
+
   if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed." });
   if (pathname === "/admin" || pathname === "/admin/") return serveStatic(rootDir, "/admin.html", response);
   return serveStatic(rootDir, pathname, response);
@@ -140,11 +194,20 @@ async function routeGallery(request, response, segments, url) {
 
   if (action === "face") return face.handleGallery(request, response, gallery, session, segments.slice(2), url);
 
+  // Friend sessions may fetch their matched image derivatives, but cannot use
+  // any endpoint that exposes or changes the browsable event gallery.
+  if (session.role === "friend" && !["face", "summary", "thumbs", "previews", "files"].includes(action)) {
+    return sendJson(response, 403, { error: "Friend access is limited to Find my photos." });
+  }
+
   if (request.method === "GET" && action === "summary") return handleSummary(response, gallery, session);
-  if (request.method === "GET" && action === "images") return handleImages(response, gallery, url);
+  if (request.method === "GET" && action === "images") return handleImages(response, gallery, url, session);
   if (request.method === "POST" && action === "images-by-id") return handleImagesById(request, response, gallery);
   if (request.method === "GET" && action === "favorites") return handleGetFavorites(response, gallery, session);
   if (request.method === "PUT" && action === "favorites") return handleSaveFavorites(request, response, gallery, session);
+  if (request.method === "GET" && action === "hidden") return handleGetHidden(response, gallery);
+  if (request.method === "PUT" && action === "hidden") return handleSaveHidden(request, response, gallery);
+  if (request.method === "PUT" && action === "cover-image" && segments[2]) return handleSetCoverImage(response, gallery, decodeURIComponent(segments[2]));
   if (request.method === "GET" && action === "thumbs") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "thumb");
   if (request.method === "GET" && action === "previews") return handleDerivative(response, gallery, decodeURIComponent(segments[2] || ""), "preview");
 
@@ -207,17 +270,21 @@ function handleSummary(response, gallery, session) {
   });
 }
 
-function handleImages(response, gallery, url) {
+function handleImages(response, gallery, url, session) {
   const sceneName = url.searchParams.get("scene") || "all";
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0) | 0);
   const limit = Math.min(maxPageSize, Math.max(1, Number(url.searchParams.get("limit") || 60) | 0));
   const result = cache.page(gallery.slug, sceneName, offset, limit);
 
+  // Filter out hidden photos for guests (only clients can see all photos)
+  const hiddenIds = session?.role === "client" ? new Set() : new Set(hidden.read(gallery.slug));
+  const filteredImages = result.images.filter((image) => !hiddenIds.has(image.id));
+
   return sendJson(response, 200, {
     total: result.total,
     offset,
     limit,
-    images: result.images.map((image) => withUrls(gallery.slug, image))
+    images: filteredImages.map((image) => withUrls(gallery.slug, image))
   });
 }
 
@@ -240,6 +307,29 @@ async function handleSaveFavorites(request, response, gallery, session) {
   const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 5000) : [];
   const saved = await favorites.write(gallery.slug, session.role, session.viewerId, ids);
   return sendJson(response, 200, { ids: saved });
+}
+
+function handleGetHidden(response, gallery) {
+  const ids = hidden.read(gallery.slug);
+  return sendJson(response, 200, { ids });
+}
+
+async function handleSaveHidden(request, response, gallery) {
+  const body = await readJsonBody(request);
+  const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 5000) : [];
+  const saved = await hidden.write(gallery.slug, ids);
+  return sendJson(response, 200, { ids: saved });
+}
+
+function handleSetCoverImage(response, gallery, fileId) {
+  const located = cache.findImage(gallery.slug, fileId);
+  if (!located) return sendJson(response, 404, { error: "Photo not found in this gallery." });
+
+  // Update the gallery with the new cover image
+  gallery.coverImage = `${basePath}/api/galleries/${encodeURIComponent(gallery.slug)}/previews/${encodeURIComponent(fileId)}`;
+  config.save();
+
+  return sendJson(response, 200, { ok: true, coverImage: gallery.coverImage });
 }
 
 function withUrls(slug, image) {
@@ -343,6 +433,7 @@ async function handleDeleteEvent(response, slug) {
   if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
   config.remove(slug);
   await cache.remove(slug);
+  await face.removeIndex(slug);
   return sendJson(response, 200, { ok: true });
 }
 
@@ -455,6 +546,14 @@ async function routeAdmin(request, response, segments, url) {
     if (request.method === "GET") return sendJson(response, 200, { sync: sync.status(slug) });
   }
 
+  if (segments[0] === "events" && segments[1] && segments[2] === "face-index") {
+    const slug = decodeURIComponent(segments[1]);
+    if (!config.find(slug)) return sendJson(response, 404, { error: "Gallery not found." });
+
+    if (request.method === "POST") return sendJson(response, 202, { ok: true, faceIndex: face.rebuildIndex(slug) });
+    if (request.method === "GET") return sendJson(response, 200, { faceIndex: face.indexStatus(slug) });
+  }
+
   if (request.method === "PUT" && segments[0] === "events" && segments[1] && !segments[2]) {
     return handleUpdateEvent(request, response, decodeURIComponent(segments[1]));
   }
@@ -499,6 +598,7 @@ function toAdminEvent(gallery) {
     coverImage: gallery.coverImage || "",
     clientCode: getAccessCode(gallery, "client"),
     guestCode: getAccessCode(gallery, "guest"),
+    friendCode: getAccessCode(gallery, "friend"),
     sync: { status: state.status, queued: state.queued, cachedThumbnails: state.cachedThumbnails || 0, totalImages: state.totalImages || 0, error: state.error || "" }
   };
 }
@@ -527,8 +627,36 @@ async function handleCreateEvent(request, response) {
     coverImage: String(body.coverImage || "").trim(),
     accessCodes: createAccessCodes(clientCode, String(body.guestCode || "guest").trim() || "guest")
   });
+  setAccessCode(gallery, "friend", String(body.friendCode || "friend").trim() || "friend");
 
   sync.enqueue(slug);
+
+  // Send notifications for event creation asynchronously (don't wait for API response)
+  setImmediate(async () => {
+    try {
+      const guestCode = getAccessCode(gallery, "guest");
+      const friendCode = getAccessCode(gallery, "friend");
+      const protocol = isSecureRequest(request) ? "https" : "http";
+      const host = request.headers.host || "localhost";
+      const galleryUrl = `${protocol}://${host}${basePath}/?event=${encodeURIComponent(slug)}`;
+      const eventFolderId = await drive.resolveEventFolderId(gallery);
+      const googleDriveFolderUrl = `https://drive.google.com/drive/u/2/folders/${encodeURIComponent(eventFolderId)}`;
+
+      await notifications.notifyEventCreated({
+        eventName,
+        eventDate: gallery.eventDate,
+        clientCode,
+        guestCode,
+        friendCode,
+        galleryUrl,
+        googleDriveFolderUrl
+      });
+      console.log(`[Notifications] Event created notification sent for gallery: ${slug}`);
+    } catch (error) {
+      console.error(`[Notifications] Failed to send event creation notifications:`, error.message);
+    }
+  });
+
   return sendJson(response, 201, { ok: true, event: toAdminEvent(gallery) });
 }
 
@@ -547,6 +675,7 @@ async function handleUpdateEvent(request, response, slug) {
   }
   if (body.clientCode !== undefined) setAccessCode(gallery, "client", String(body.clientCode).trim());
   if (body.guestCode !== undefined) setAccessCode(gallery, "guest", String(body.guestCode).trim());
+  if (body.friendCode !== undefined) setAccessCode(gallery, "friend", String(body.friendCode).trim() || "friend");
 
   config.save();
   if (sourceSignature(gallery) !== before) sync.enqueue(slug);

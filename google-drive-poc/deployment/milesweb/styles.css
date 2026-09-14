@@ -70,7 +70,7 @@ button {
   align-self: center;
   width: min(100%, 430px);
   padding: 2rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.68);
   border: 1px solid rgba(222, 217, 207, 0.8);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -99,7 +99,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.85rem 0.9rem;
-  background: var(--panel);
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .access-row {
@@ -120,8 +120,7 @@ button {
   background: var(--panel);
 }
 
-.access-row button,
-#lightboxFavorite {
+.access-row button {
   border-radius: 6px;
   padding: 0.85rem 1.1rem;
   color: #fff;
@@ -129,8 +128,7 @@ button {
   font-weight: 800;
 }
 
-.access-row button:hover,
-#lightboxFavorite:hover {
+.access-row button:hover {
   background: var(--accent-strong);
 }
 
@@ -262,15 +260,16 @@ button {
 }
 
 .gallery-grid {
-  column-count: 4;
-  column-gap: 0.75rem;
+  position: relative;
   padding: 0.75rem;
 }
 
 .photo-tile {
-  position: relative;
-  break-inside: avoid;
-  margin: 0 0 0.75rem;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  margin: 0;
   overflow: hidden;
   border-radius: 6px;
   background: #e9e3d8;
@@ -281,16 +280,29 @@ button {
   display: block;
 }
 
+.favorite-button,
+.tile-download,
+.tile-crown,
+.tile-hide,
+.tile-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 0.35rem 0.9rem rgba(20, 20, 20, 0.2);
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
 .favorite-button {
   position: absolute;
   top: 0.6rem;
   right: 0.6rem;
-  width: 2.35rem;
-  height: 2.35rem;
-  border-radius: 999px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
 }
 
 .favorite-button.active {
@@ -313,8 +325,6 @@ button {
 .tile-remove,
 .remove-button {
   border-radius: 6px;
-  color: #fff;
-  background: rgba(179, 38, 30, 0.9);
   font-weight: 800;
 }
 
@@ -322,15 +332,69 @@ button {
   position: absolute;
   right: 0.6rem;
   bottom: 0.6rem;
-  padding: 0.45rem 0.65rem;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.tile-client-actions {
+  position: absolute;
+  bottom: 0.6rem;
+  left: 50%;
+  display: flex;
+  gap: 0.4rem;
+  transform: translateX(-50%);
+}
+
+.tile-crown,
+.tile-hide {
+  font-weight: 800;
+}
+
+.favorite-button svg,
+.tile-download svg,
+.tile-crown svg,
+.tile-hide svg,
+.tile-remove svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.favorite-button:hover,
+.tile-download:hover,
+.tile-crown:hover,
+.tile-hide:hover,
+.tile-remove:hover {
+  transform: scale(1.08);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.favorite-button.active,
+.tile-crown.active,
+.tile-hide.active {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0.35rem 0.9rem rgba(20, 20, 20, 0.2), inset 0 0 0 0.12rem currentColor;
+}
+
+.tile-hide.active {
+  color: var(--sage);
+}
+
+.tile-remove {
+  color: var(--accent);
+}
+
+.tile-remove:hover {
+  color: var(--accent-strong);
+}
+
+.tile-crown.active:hover,
+.tile-hide.active:hover,
+.favorite-button.active:hover {
+  background: var(--panel);
 }
 
 .tile-download,
 .download-button {
   border-radius: 6px;
-  color: #fff;
-  background: var(--sage);
   font-weight: 800;
   text-decoration: none;
 }
@@ -339,8 +403,6 @@ button {
   position: absolute;
   left: 0.6rem;
   bottom: 0.6rem;
-  padding: 0.45rem 0.65rem;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
 }
 
 .download-button {
@@ -353,12 +415,12 @@ button {
 
 .tile-download:hover,
 .download-button:hover {
-  background: #596b50;
+  color: var(--sage);
 }
 
 .tile-remove:hover,
 .remove-button:hover {
-  background: #8b241a;
+  color: var(--accent-strong);
 }
 
 dialog {
@@ -428,7 +490,37 @@ dialog footer {
 
 .dialog-actions {
   display: flex;
-  gap: 0.6rem;
+  gap: 0.4rem;
+}
+
+.dialog-actions > button,
+.dialog-actions > .download-button {
+  height: 2.1rem;
+  min-height: 2.1rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 5px;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+#lightboxFavorite {
+  color: #fff;
+  background: var(--accent);
+}
+
+#lightboxFavorite:hover {
+  background: var(--accent-strong);
+}
+
+#lightboxRemove {
+  color: #fff;
+  background: rgba(179, 38, 30, 0.9);
+}
+
+#lightboxRemove:hover {
+  background: #8b241a;
 }
 
 .success {
@@ -557,9 +649,42 @@ dialog footer {
   background: var(--paper);
 }
 
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 15rem;
+}
+
+.row-action-button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.32rem 0.55rem;
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.row-action-button:hover {
+  border-color: var(--sage);
+  background: var(--panel);
+}
+
+.row-action-button.danger {
+  border-color: transparent;
+  color: #fff;
+  background: rgba(179, 38, 30, 0.9);
+}
+
+.row-action-button.danger:hover {
+  background: #8b241a;
+}
+
 .row-status {
-  display: inline-block;
-  margin-left: 0.6rem;
+  display: block;
+  margin: 0.35rem 0 0;
   font-size: 0.85rem;
   font-weight: 700;
 }

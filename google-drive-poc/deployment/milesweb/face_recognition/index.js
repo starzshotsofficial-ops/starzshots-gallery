@@ -26,23 +26,39 @@ function createFaceRecognition({
   config,
   dataDir,
   basePath,
+  port,
   thumbnailSize,
   sendJson,
   readJsonBody,
   SECURITY_HEADERS,
   logger = console,
+  onIndexComplete,
   options = {}
 }) {
-  const modelsDir = path.join(__dirname, "models");
   const publicDir = path.join(__dirname, "public");
+  const modelsDir = path.join(__dirname, "models");
+  const modelFiles = new Set(["blazeface.json", "blazeface.bin", "facemesh.json", "facemesh.bin", "faceres.json", "faceres.bin"]);
 
   const engine = createFaceEngine({
-    modelsDir,
-    detector: options.detector || "tiny",
-    minConfidence: options.minConfidence ?? 0.5,
-    matchThreshold: options.matchThreshold ?? 0.5
+    // Node's fetch (undici) does not support file:// URLs, so models are served over our
+    // own loopback HTTP endpoint instead of read directly off disk or from a public CDN.
+    modelBasePath: options.modelBasePath || `http://127.0.0.1:${port}${basePath}/face-models/`,
+    wasmPath: options.wasmPath,
+    matchThreshold: options.matchThreshold ?? 0.4,
+    minFaceSize: options.minFaceSize ?? 34,
+    minScore: options.minScore ?? 0.4,
+    maxDetected: options.maxDetected ?? 100
   });
-  const index = createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize });
+  const index = createFaceIndex({
+    dataDir,
+    cache,
+    drive,
+    engine,
+    thumbnailSize,
+    logger,
+    faceImageSize: options.faceImageSize ?? 2048,
+    onBuildComplete: onIndexComplete
+  });
   const setup = createSetup({
     moduleDir: __dirname,
     modelsDir,
@@ -89,6 +105,18 @@ function createFaceRecognition({
     return fs.createReadStream(file).pipe(response);
   }
 
+  /** Serves a downloaded Human model file to the inference worker's fetch() call. */
+  function handleModelFile(response, filename) {
+    if (!modelFiles.has(filename)) return sendJson(response, 404, { error: "Not found." });
+
+    const file = path.join(modelsDir, filename);
+    if (!fs.existsSync(file)) return sendJson(response, 404, { error: "Not found." });
+
+    const contentType = filename.endsWith(".json") ? "application/json" : "application/octet-stream";
+    response.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-cache", ...SECURITY_HEADERS });
+    return fs.createReadStream(file).pipe(response);
+  }
+
   async function handleGallery(request, response, gallery, session, segments, url) {
     const action = segments[0] || "";
     const slug = gallery.slug;
@@ -104,7 +132,7 @@ function createFaceRecognition({
     }
 
     if (request.method === "POST" && action === "search") {
-      const body = await readJsonBody(request, 4 * 1024 * 1024);
+      const body = await readJsonBody(request, 12 * 1024 * 1024);
       const buffer = decodeSelfie(body.image);
       if (!buffer) return sendJson(response, 400, { error: "Please choose a clear selfie photo." });
 
@@ -120,7 +148,8 @@ function createFaceRecognition({
       let descriptor;
       try {
         descriptor = await engine.describeLargest(buffer);
-      } catch {
+      } catch (error) {
+        logger.error(`[face] selfie read failed for ${slug}: ${error.message}`);
         return sendJson(response, 422, { error: "That photo could not be read. Try a clear, front-facing selfie." });
       }
       if (!descriptor) return sendJson(response, 200, { status: "no-face" });
@@ -156,7 +185,24 @@ function createFaceRecognition({
     };
   }
 
-  return { handlePage, handleGallery, onSyncComplete, indexAllReady, ready: setup.ready };
+  return {
+    handlePage,
+    handleModelFile,
+    handleGallery,
+    onSyncComplete,
+    indexAllReady,
+    ready: setup.ready,
+    // For the admin "Rebuild face index" button; bypasses the isStale() freshness check.
+    rebuildIndex: (slug) => {
+      setup.ensureReady().then((ok) => {
+        if (ok) index.enqueueBuild(slug, { force: true });
+      });
+      return index.status(slug);
+    },
+    indexStatus: (slug) => index.status(slug),
+    // Removes a gallery's whole face index (index.json + high-res src cache); call on event delete.
+    removeIndex: (slug) => index.remove(slug)
+  };
 }
 
 function decodeSelfie(value) {

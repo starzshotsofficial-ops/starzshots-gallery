@@ -1,110 +1,81 @@
 "use strict";
 
 /**
- * Wraps @vladmandic/face-api with a pure-JS TensorFlow.js backend so it runs on
- * shared hosting (MilesWeb / Passenger) without any native modules.
+ * Proxy in front of the inference worker thread. All heavy face detection /
+ * description runs in lib/inference-worker.js (using @vladmandic/human) so the
+ * gallery's event loop stays responsive while a (possibly hours-long) index
+ * build is running.
  *
- * Thumbnails and selfies are decoded with jpeg-js (pure JS) into an int32 RGB
- * tensor, then face-api detects faces, aligns them with 68 landmarks and returns
- * a 128-float descriptor per face. Two faces belong to the same person when the
- * Euclidean distance between their descriptors is below `matchThreshold`.
- *
- * The heavy packages are require()d lazily so the app still boots (and can run its
- * own auto-install) before they are present on disk.
+ * Embeddings are L2-normalized in the worker, so faces are matched here with
+ * cosine distance (1 - dot); below `matchThreshold` = same person.
  */
 
-function createFaceEngine({
-  modelsDir,
-  detector = "tiny",
-  minConfidence = 0.5,
-  matchThreshold = 0.5
-}) {
-  let faceapi = null;
-  let jpeg = null;
-  let tf = null;
-  let loadPromise = null;
+const path = require("path");
+const { Worker } = require("worker_threads");
 
-  function loadPackages() {
-    if (!faceapi) {
-      faceapi = require("@vladmandic/face-api");
-      jpeg = require("jpeg-js");
-      tf = faceapi.tf;
-    }
+function createFaceEngine({
+  modelBasePath,
+  wasmPath,
+  matchThreshold = 0.4,
+  minFaceSize = 34,
+  minScore = 0.4,
+  maxDetected = 100
+}) {
+  let worker = null;
+  let seq = 0;
+  const pending = new Map();
+
+  function ensureWorker() {
+    if (worker) return worker;
+    worker = new Worker(path.join(__dirname, "inference-worker.js"), {
+      workerData: { modelBasePath, wasmPath, maxDetected, minFaceSize, minScore }
+    });
+    worker.on("message", (message) => {
+      const entry = pending.get(message.id);
+      if (!entry) return;
+      pending.delete(message.id);
+      if (message.error) entry.reject(new Error(message.error));
+      else entry.resolve(message.result);
+    });
+    worker.on("error", (error) => {
+      for (const entry of pending.values()) entry.reject(error);
+      pending.clear();
+      worker = null; // Allow a fresh worker on the next request.
+    });
+    worker.on("exit", () => {
+      worker = null;
+    });
+    return worker;
+  }
+
+  function run(type, buffer) {
+    const activeWorker = ensureWorker();
+    const id = ++seq;
+    // Copy into a standalone ArrayBuffer we can transfer (zero-copy) to the worker.
+    const transfer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      activeWorker.postMessage({ type, id, buffer: transfer }, [transfer]);
+    });
   }
 
   async function ensureLoaded() {
-    if (!loadPromise) {
-      loadPromise = (async () => {
-        loadPackages();
-        await tf.ready();
-        await faceapi.nets.faceLandmark68Net.loadFromDisk(modelsDir);
-        await faceapi.nets.faceRecognitionNet.loadFromDisk(modelsDir);
-        if (detector === "ssd") await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsDir);
-        else await faceapi.nets.tinyFaceDetector.loadFromDisk(modelsDir);
-      })().catch((error) => {
-        loadPromise = null;
-        throw error;
-      });
-    }
-    return loadPromise;
+    ensureWorker();
   }
 
-  function detectorOptions() {
-    return detector === "ssd"
-      ? new faceapi.SsdMobilenetv1Options({ minConfidence })
-      : new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: minConfidence });
+  function describeAll(buffer) {
+    return run("describeAll", buffer);
   }
 
-  /** Decodes a JPEG buffer into an int32 [height, width, 3] RGB tensor. Caller must dispose. */
-  function decodeToTensor(buffer) {
-    const { width, height, data } = jpeg.decode(buffer, { useTArray: true, maxMemoryUsageInMB: 512 });
-    const pixelCount = width * height;
-    const rgb = new Int32Array(pixelCount * 3);
-    for (let i = 0; i < pixelCount; i += 1) {
-      rgb[i * 3] = data[i * 4];
-      rgb[i * 3 + 1] = data[i * 4 + 1];
-      rgb[i * 3 + 2] = data[i * 4 + 2];
-    }
-    return tf.tensor3d(rgb, [height, width, 3], "int32");
+  function describeLargest(buffer) {
+    return run("describeLargest", buffer);
   }
 
-  /** Returns a 128-float descriptor for every face found in the image. */
-  async function describeAll(buffer) {
-    await ensureLoaded();
-    const tensor = decodeToTensor(buffer);
-    try {
-      const results = await faceapi
-        .detectAllFaces(tensor, detectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-      return results.map((result) => Array.from(result.descriptor));
-    } finally {
-      tensor.dispose();
-    }
-  }
-
-  /** Returns the descriptor of the single most prominent face (used for the selfie). */
-  async function describeLargest(buffer) {
-    await ensureLoaded();
-    const tensor = decodeToTensor(buffer);
-    try {
-      const result = await faceapi
-        .detectSingleFace(tensor, detectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      return result ? Array.from(result.descriptor) : null;
-    } finally {
-      tensor.dispose();
-    }
-  }
-
+  // Cosine distance on L2-normalized embeddings: 0 = identical, up to 2 = opposite.
   function distance(a, b) {
-    let sum = 0;
-    for (let i = 0; i < a.length; i += 1) {
-      const diff = a[i] - b[i];
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum);
+    let dot = 0;
+    for (let i = 0; i < a.length; i += 1) dot += a[i] * b[i];
+    return 1 - dot;
   }
 
   return { ensureLoaded, describeAll, describeLargest, distance, matchThreshold };

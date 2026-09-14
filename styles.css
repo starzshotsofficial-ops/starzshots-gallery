@@ -120,8 +120,7 @@ button {
   background: var(--panel);
 }
 
-.access-row button,
-#lightboxFavorite {
+.access-row button {
   border-radius: 6px;
   padding: 0.85rem 1.1rem;
   color: #fff;
@@ -129,8 +128,7 @@ button {
   font-weight: 800;
 }
 
-.access-row button:hover,
-#lightboxFavorite:hover {
+.access-row button:hover {
   background: var(--accent-strong);
 }
 
@@ -428,7 +426,37 @@ dialog footer {
 
 .dialog-actions {
   display: flex;
-  gap: 0.6rem;
+  gap: 0.4rem;
+}
+
+.dialog-actions > button,
+.dialog-actions > .download-button {
+  height: 2.1rem;
+  min-height: 2.1rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 5px;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+#lightboxFavorite {
+  color: #fff;
+  background: var(--accent);
+}
+
+#lightboxFavorite:hover {
+  background: var(--accent-strong);
+}
+
+#lightboxRemove {
+  color: #fff;
+  background: rgba(179, 38, 30, 0.9);
+}
+
+#lightboxRemove:hover {
+  background: #8b241a;
 }
 
 .success {

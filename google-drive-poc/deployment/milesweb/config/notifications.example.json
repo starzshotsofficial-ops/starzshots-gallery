@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "email": {
+    "enabled": true,
+    "service": "gmail",
+    "user": "starzshotsofficial@gmail.com",
+    "password": "your-gmail-app-password-here"
+  },
+  "whatsapp": {
+    "enabled": true,
+    "provider": "callmebot",
+    "apikey": "your-callmebot-apikey"
+  },
+  "adminPhone": "+919962206330",
+  "adminEmail": "starzshotsofficial@gmail.com"
+}

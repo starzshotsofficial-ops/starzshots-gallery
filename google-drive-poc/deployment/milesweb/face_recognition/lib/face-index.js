@@ -16,7 +16,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 
-function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpointEvery = 20 }) {
+function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, logger = console, checkpointEvery = 20, faceImageSize = 1000, onBuildComplete }) {
   const facesDir = path.join(dataDir, "faces");
   const jobs = new Map();
   const buildQueue = [];
@@ -29,6 +29,11 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
 
   function indexPath(slug) {
     return path.join(facesDir, safe(slug), "index.json");
+  }
+
+  // Higher-resolution source used only for face detection, cached apart from the 400px grid thumbnails.
+  function faceSrcPath(slug, id) {
+    return path.join(facesDir, safe(slug), "src", `${safe(id)}.jpg`);
   }
 
   function readIndex(slug) {
@@ -61,11 +66,12 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
   }
 
   async function thumbnailBuffer(slug, image) {
-    const cachedPath = cache.thumbnailPath(slug, image.sceneDir, image.id);
+    // Prefer a larger image so faces in group photos are big enough for a reliable descriptor.
+    const cachedPath = faceSrcPath(slug, image.id);
     if (fs.existsSync(cachedPath)) return fsp.readFile(cachedPath);
 
     const file = await drive.getFile(image.id);
-    const source = await drive.streamThumbnail(file.thumbnailLink, thumbnailSize);
+    const source = await drive.streamThumbnail(file.thumbnailLink, faceImageSize);
     if (!source || source.statusCode < 200 || source.statusCode >= 300) {
       source?.resume();
       return null;
@@ -111,12 +117,18 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
     const job = { status: "running", processed: 0, total: images.length };
     jobs.set(slug, job);
 
+    let reused = 0;
+    let detected = 0;
+    let failures = 0;
+    let firstError = null;
+
     try {
       const results = [];
       for (const image of images) {
         job.processed += 1;
 
         if (done.has(image.id)) {
+          reused += 1;
           results.push(done.get(image.id));
           continue;
         }
@@ -125,8 +137,10 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
         try {
           const buffer = await thumbnailBuffer(slug, image);
           if (buffer) record.faces = await engine.describeAll(buffer);
-        } catch {
-          // A single unreadable photo must never abort the whole index.
+          detected += record.faces.length;
+        } catch (error) {
+          failures += 1;
+          if (!firstError) firstError = error;
         }
         results.push(record);
 
@@ -137,10 +151,37 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
 
       await writeIndex(slug, buildPayload(slug, images.length, results));
       job.status = "done";
+      // The high-res source images are only needed while (re)building; descriptors now live in index.json.
+      await removeSrc(slug);
+      logger.log(
+        `[face] index built for ${slug}: ${images.length} images, ${detected} faces, ${reused} reused, ${failures} failures.`
+      );
+      if (firstError) logger.error(`[face] first indexing error for ${slug}: ${firstError.message}`);
+      if (typeof onBuildComplete === "function") {
+        try {
+          await onBuildComplete(slug, {
+            completed: true,
+            faceCount: results.reduce((total, entry) => total + (entry.faces || []).length, 0)
+          });
+        } catch (error) {
+          logger.warn(`[face] completion hook failed for ${slug}: ${error.message}`);
+        }
+      }
     } catch (error) {
       job.status = "error";
       job.error = error.message;
+      logger.error(`[face] index build failed for ${slug}: ${error.message}`);
     }
+  }
+
+  /** Removes the high-res source cache (faces/<slug>/src) but keeps index.json. */
+  async function removeSrc(slug) {
+    await fsp.rm(path.join(facesDir, safe(slug), "src"), { recursive: true, force: true }).catch(() => {});
+  }
+
+  /** Removes the entire face index for a gallery (index.json + src). Call when an event is deleted. */
+  async function remove(slug) {
+    await fsp.rm(path.join(facesDir, safe(slug)), { recursive: true, force: true }).catch(() => {});
   }
 
   function buildPayload(slug, total, images) {
@@ -196,7 +237,7 @@ function createFaceIndex({ dataDir, cache, drive, engine, thumbnailSize, checkpo
     return matches.slice(0, limit);
   }
 
-  return { status, build, ensureBuilt, enqueueBuild, search, readIndex, isStale };
+  return { status, build, ensureBuilt, enqueueBuild, search, readIndex, isStale, remove };
 }
 
 module.exports = { createFaceIndex };
